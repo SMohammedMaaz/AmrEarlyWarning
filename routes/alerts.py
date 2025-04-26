@@ -1,11 +1,11 @@
-import json
-from datetime import datetime
-from flask import Blueprint, render_template, request, jsonify, flash, redirect, url_for
+from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify
 from flask_login import login_required, current_user
 import logging
+from datetime import datetime, timedelta
 
 from app import db
-from models import Alert, AlertPriority, AlertStatus, User, Organization, Pathogen
+from models import Alert, Pathogen, Antibiotic, User, UserRole
+from utils import send_alert
 
 logger = logging.getLogger(__name__)
 
@@ -14,70 +14,95 @@ alerts_bp = Blueprint('alerts', __name__, url_prefix='/alerts')
 @alerts_bp.route('/')
 @login_required
 def alerts_view():
+    """View all alerts with filtering options"""
     # Get filter parameters
-    status = request.args.get('status')
-    priority = request.args.get('priority')
+    alert_type = request.args.get('alert_type')
+    severity = request.args.get('severity', type=int)
+    read = request.args.get('read')
+    action_taken = request.args.get('action_taken')
     
-    # Build query with filters
-    query = Alert.query
+    # Base query - get alerts for current user
+    query = Alert.query.filter(Alert.user_id == current_user.id)
     
-    if status:
-        query = query.filter(Alert.status == AlertStatus(status))
-    if priority:
-        query = query.filter(Alert.priority == AlertPriority(priority))
+    # Apply filters
+    if alert_type:
+        query = query.filter(Alert.alert_type == alert_type)
     
-    # Get alerts for the current user
-    alerts = query.filter(Alert.user_id == current_user.id).order_by(Alert.created_at.desc()).all()
+    if severity:
+        query = query.filter(Alert.severity == severity)
     
-    return render_template('alerts.html', alerts=alerts, 
-                          alert_statuses=AlertStatus, 
-                          alert_priorities=AlertPriority)
+    if read is not None:
+        read_bool = read.lower() == 'true'
+        query = query.filter(Alert.read == read_bool)
+    
+    if action_taken is not None:
+        action_bool = action_taken.lower() == 'true'
+        query = query.filter(Alert.action_taken == action_bool)
+    
+    # Execute query with pagination
+    page = request.args.get('page', 1, type=int)
+    alerts = query.order_by(Alert.created_at.desc()).paginate(page=page, per_page=20)
+    
+    # Count unread alerts
+    unread_count = Alert.query.filter(Alert.user_id == current_user.id, Alert.read == False).count()
+    
+    return render_template('alerts.html',
+                          alerts=alerts,
+                          unread_count=unread_count,
+                          current_filters={
+                              'alert_type': alert_type,
+                              'severity': severity,
+                              'read': read,
+                              'action_taken': action_taken
+                          })
 
 @alerts_bp.route('/acknowledge/<int:alert_id>', methods=['POST'])
 @login_required
 def acknowledge_alert(alert_id):
+    """Mark an alert as read"""
     alert = Alert.query.get_or_404(alert_id)
     
-    # Check if the alert belongs to the current user
+    # Check if alert belongs to current user
     if alert.user_id != current_user.id:
-        flash('You do not have permission to acknowledge this alert', 'danger')
+        flash('You do not have permission to access this alert', 'danger')
         return redirect(url_for('alerts.alerts_view'))
     
-    alert.status = AlertStatus.ACKNOWLEDGED
-    alert.acknowledged_at = datetime.utcnow()
+    alert.read = True
     db.session.commit()
     
-    flash('Alert acknowledged', 'success')
+    flash('Alert marked as read', 'success')
     return redirect(url_for('alerts.alerts_view'))
 
 @alerts_bp.route('/resolve/<int:alert_id>', methods=['POST'])
 @login_required
 def resolve_alert(alert_id):
+    """Mark an alert as action taken"""
     alert = Alert.query.get_or_404(alert_id)
     
-    # Check if the alert belongs to the current user
+    # Check if alert belongs to current user
     if alert.user_id != current_user.id:
-        flash('You do not have permission to resolve this alert', 'danger')
+        flash('You do not have permission to access this alert', 'danger')
         return redirect(url_for('alerts.alerts_view'))
     
-    alert.status = AlertStatus.RESOLVED
-    alert.resolved_at = datetime.utcnow()
+    alert.action_taken = True
     db.session.commit()
     
-    flash('Alert resolved', 'success')
+    flash('Alert marked as resolved', 'success')
     return redirect(url_for('alerts.alerts_view'))
 
 @alerts_bp.route('/dismiss/<int:alert_id>', methods=['POST'])
 @login_required
 def dismiss_alert(alert_id):
+    """Mark an alert as read and action taken"""
     alert = Alert.query.get_or_404(alert_id)
     
-    # Check if the alert belongs to the current user
+    # Check if alert belongs to current user
     if alert.user_id != current_user.id:
-        flash('You do not have permission to dismiss this alert', 'danger')
+        flash('You do not have permission to access this alert', 'danger')
         return redirect(url_for('alerts.alerts_view'))
     
-    alert.status = AlertStatus.DISMISSED
+    alert.read = True
+    alert.action_taken = True
     db.session.commit()
     
     flash('Alert dismissed', 'success')
@@ -86,136 +111,116 @@ def dismiss_alert(alert_id):
 @alerts_bp.route('/create', methods=['GET', 'POST'])
 @login_required
 def create_alert():
-    pathogens = Pathogen.query.all()
-    users = User.query.all()
+    """Create a manual alert (admin only)"""
+    if current_user.role != UserRole.ADMIN:
+        flash('Only administrators can create manual alerts', 'danger')
+        return redirect(url_for('alerts.alerts_view'))
     
     if request.method == 'POST':
-        try:
-            title = request.form.get('title')
-            message = request.form.get('message')
-            priority = AlertPriority(request.form.get('priority'))
-            user_id = request.form.get('user_id')
-            lat = request.form.get('lat')
-            lng = request.form.get('lng')
-            radius = request.form.get('radius')
-            pathogen_id = request.form.get('pathogen_id')
-            recommendations = request.form.get('recommendations')
-            
+        title = request.form.get('title')
+        message = request.form.get('message')
+        alert_type = request.form.get('alert_type')
+        severity = request.form.get('severity', type=int)
+        pathogen_id = request.form.get('pathogen_id')
+        antibiotic_id = request.form.get('antibiotic_id')
+        
+        # Get user IDs to send alert to (by role or all)
+        target_role = request.form.get('target_role')
+        
+        if target_role == 'all':
+            users = User.query.filter(User.is_active == True).all()
+        else:
+            users = User.query.filter(User.role == UserRole(target_role), User.is_active == True).all()
+        
+        # Create alerts for each user
+        for user in users:
             alert = Alert(
+                user_id=user.id,
                 title=title,
                 message=message,
-                priority=priority,
-                user_id=user_id,
-                lat=lat if lat else None,
-                lng=lng if lng else None,
-                radius=radius if radius else None,
+                alert_type=alert_type,
+                severity=severity,
                 pathogen_id=pathogen_id if pathogen_id else None,
-                recommendations=recommendations
+                antibiotic_id=antibiotic_id if antibiotic_id else None
             )
-            
             db.session.add(alert)
-            db.session.commit()
             
-            flash('Alert created successfully', 'success')
-            return redirect(url_for('alerts.alerts_view'))
-            
-        except Exception as e:
-            logger.error(f"Error creating alert: {str(e)}")
-            flash(f'Error creating alert: {str(e)}', 'danger')
+            # Send notifications
+            send_alert(user, alert)
+        
+        db.session.commit()
+        flash(f'Alert sent to {len(users)} users', 'success')
+        return redirect(url_for('admin.admin_dashboard'))
     
-    return render_template('create_alert.html', 
-                          pathogens=pathogens, 
-                          users=users, 
-                          alert_priorities=AlertPriority)
+    # GET request - render the form
+    pathogens = Pathogen.query.all()
+    antibiotics = Antibiotic.query.all()
+    
+    return render_template('admin/create_alert.html',
+                          pathogens=pathogens,
+                          antibiotics=antibiotics,
+                          user_roles=UserRole)
 
 @alerts_bp.route('/api/latest')
 @login_required
 def get_latest_alerts():
-    # Get the latest 10 alerts for the current user
-    alerts = Alert.query.filter_by(user_id=current_user.id).order_by(Alert.created_at.desc()).limit(10).all()
+    """API endpoint to get latest alerts for notification checks"""
+    # Get alerts from the last 24 hours that are unread
+    since = datetime.now() - timedelta(days=1)
+    alerts = Alert.query.filter(
+        Alert.user_id == current_user.id,
+        Alert.read == False,
+        Alert.created_at >= since
+    ).order_by(Alert.created_at.desc()).all()
     
-    alerts_list = []
+    results = []
     for alert in alerts:
-        alerts_list.append({
+        results.append({
             'id': alert.id,
             'title': alert.title,
             'message': alert.message,
-            'priority': alert.priority.value,
-            'status': alert.status.value,
-            'created_at': alert.created_at.isoformat(),
-            'lat': alert.lat,
-            'lng': alert.lng,
-            'radius': alert.radius,
-            'pathogen': alert.pathogen.name if alert.pathogen else None
+            'alert_type': alert.alert_type,
+            'severity': alert.severity,
+            'created_at': alert.created_at.strftime('%Y-%m-%d %H:%M:%S')
         })
     
-    return jsonify(alerts_list)
+    return jsonify(results)
 
 @alerts_bp.route('/api/counts')
 @login_required
 def get_alert_counts():
-    # Count alerts by status for the current user
-    new_count = Alert.query.filter_by(user_id=current_user.id, status=AlertStatus.NEW).count()
-    acknowledged_count = Alert.query.filter_by(user_id=current_user.id, status=AlertStatus.ACKNOWLEDGED).count()
-    resolved_count = Alert.query.filter_by(user_id=current_user.id, status=AlertStatus.RESOLVED).count()
-    dismissed_count = Alert.query.filter_by(user_id=current_user.id, status=AlertStatus.DISMISSED).count()
+    """API endpoint to get counts of different alert types"""
+    unread_count = Alert.query.filter(Alert.user_id == current_user.id, Alert.read == False).count()
     
-    # Count alerts by priority for the current user
-    low_count = Alert.query.filter_by(user_id=current_user.id, priority=AlertPriority.LOW).count()
-    medium_count = Alert.query.filter_by(user_id=current_user.id, priority=AlertPriority.MEDIUM).count()
-    high_count = Alert.query.filter_by(user_id=current_user.id, priority=AlertPriority.HIGH).count()
-    critical_count = Alert.query.filter_by(user_id=current_user.id, priority=AlertPriority.CRITICAL).count()
+    # Count by severity
+    severity_counts = db.session.query(
+        Alert.severity,
+        db.func.count(Alert.id).label('count')
+    ).filter(
+        Alert.user_id == current_user.id,
+        Alert.read == False
+    ).group_by(
+        Alert.severity
+    ).all()
     
-    counts = {
-        'status': {
-            'new': new_count,
-            'acknowledged': acknowledged_count,
-            'resolved': resolved_count,
-            'dismissed': dismissed_count
-        },
-        'priority': {
-            'low': low_count,
-            'medium': medium_count,
-            'high': high_count,
-            'critical': critical_count
-        }
-    }
+    # Format results
+    severity_data = {}
+    for severity, count in severity_counts:
+        severity_data[str(severity)] = count
     
-    return jsonify(counts)
+    return jsonify({
+        'unread_count': unread_count,
+        'severity_counts': severity_data
+    })
 
-@alerts_bp.route('/guidance')
+@alerts_bp.route('/treatment')
 @login_required
 def treatment_guidance():
-    # Get alert for guidance if provided
-    alert_id = request.args.get('alert_id')
+    """Get treatment guidance based on alerts"""
+    # Get alerts with pathogen information
+    alerts = Alert.query.filter(
+        Alert.user_id == current_user.id, 
+        Alert.pathogen_id.isnot(None)
+    ).order_by(Alert.created_at.desc()).limit(10).all()
     
-    if alert_id:
-        alert = Alert.query.get_or_404(alert_id)
-        pathogen = alert.pathogen
-    else:
-        alert = None
-        pathogen_id = request.args.get('pathogen_id')
-        if pathogen_id:
-            pathogen = Pathogen.query.get_or_404(pathogen_id)
-        else:
-            pathogen = None
-    
-    pathogens = Pathogen.query.all()
-    
-    # Get treatment guidelines for the selected pathogen
-    guidelines = None
-    if pathogen:
-        # In a real application, you would query TreatmentGuideline model
-        # For demonstration, we'll create some mock guidelines based on the pathogen
-        guidelines = {
-            'first_line': f"First-line treatment for {pathogen.name}",
-            'second_line': f"Second-line treatment for {pathogen.name}",
-            'alternatives': f"Alternative treatments for {pathogen.name}",
-            'notes': "Follow standard protocols and adjust based on local antibiogram."
-        }
-    
-    return render_template('guidance.html', 
-                          alert=alert, 
-                          pathogen=pathogen, 
-                          pathogens=pathogens,
-                          guidelines=guidelines)
+    return render_template('treatment_alert.html', alerts=alerts)

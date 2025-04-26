@@ -221,7 +221,7 @@
                 {% endwith %}
                 
                 <!-- Page content -->
-                {% block content %}{% endblock %}
+                {% block auth_content %}{% endblock %}
             </main>
             {% else %}
             <!-- Full width content for landing page and auth pages -->
@@ -250,7 +250,10 @@
         <div class="container">
             <div class="row">
                 <div class="col-md-6">
-                    <p class="mb-0">&copy; {% now 'Y' %} AMR Early-Warning &amp; Mitigation Network</p>
+                    <p class="mb-0">&copy; <span id="current-year"></span> AMR Early-Warning &amp; Mitigation Network</p>
+                    <script>
+                        document.getElementById('current-year').textContent = new Date().getFullYear();
+                    </script>
                 </div>
                 <div class="col-md-6 text-md-end">
                     <p class="mb-0">

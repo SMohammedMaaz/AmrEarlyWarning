@@ -1,13 +1,11 @@
 from flask import Blueprint, render_template, request, jsonify
 from flask_login import login_required, current_user
-import pandas as pd
 import json
 from datetime import datetime, timedelta
-import numpy as np
 import logging
 
 from app import db
-from models import LabData, Organization, Pathogen, Antibiogram, GeoPoint
+from models import LabReport, Facility, Pathogen, ResistanceProfile, User, Antibiotic
 
 logger = logging.getLogger(__name__)
 
@@ -17,37 +15,35 @@ dashboard_bp = Blueprint('dashboard', __name__, url_prefix='/dashboard')
 @login_required
 def home():
     # Get summary data for dashboard
-    total_samples = LabData.query.count()
-    total_organizations = Organization.query.count()
+    total_samples = LabReport.query.count()
+    total_facilities = Facility.query.count()
     total_pathogens = Pathogen.query.count()
     
     # Calculate resistance rates
-    resistant_count = db.session.query(db.func.count(Antibiogram.id)).filter(Antibiogram.susceptibility == 'R').scalar()
-    total_tests = db.session.query(db.func.count(Antibiogram.id)).scalar()
+    resistant_count = db.session.query(db.func.count(ResistanceProfile.id)).filter(ResistanceProfile.result == 'R').scalar() or 0
+    total_tests = db.session.query(db.func.count(ResistanceProfile.id)).scalar() or 0
     resistance_rate = round((resistant_count / total_tests * 100) if total_tests > 0 else 0, 2)
     
     # Get recent lab data
-    recent_data = LabData.query.order_by(LabData.created_at.desc()).limit(5).all()
+    recent_data = LabReport.query.order_by(LabReport.report_date.desc()).limit(5).all()
     
     # Get most common resistant pathogens
     common_resistant_pathogens = db.session.query(
         Pathogen.name, 
-        db.func.count(Antibiogram.id).label('count')
+        db.func.count(ResistanceProfile.id).label('count')
     ).join(
-        LabData, LabData.pathogen_id == Pathogen.id
-    ).join(
-        Antibiogram, Antibiogram.lab_data_id == LabData.id
+        ResistanceProfile, ResistanceProfile.pathogen_id == Pathogen.id
     ).filter(
-        Antibiogram.susceptibility == 'R'
+        ResistanceProfile.result == 'R'
     ).group_by(
         Pathogen.id
     ).order_by(
-        db.func.count(Antibiogram.id).desc()
+        db.func.count(ResistanceProfile.id).desc()
     ).limit(5).all()
     
     return render_template('dashboard.html', 
                           total_samples=total_samples,
-                          total_organizations=total_organizations,
+                          total_facilities=total_facilities,
                           total_pathogens=total_pathogens,
                           resistance_rate=resistance_rate,
                           recent_data=recent_data,
@@ -61,47 +57,33 @@ def map_view():
 @dashboard_bp.route('/api/map_data')
 @login_required
 def map_data():
-    # Get all geo points with resistance data
+    # Get all facilities with coordinates
     data_points = []
     
-    # Process lab data with coordinates
-    lab_data = LabData.query.filter(
-        LabData.latitude.isnot(None),
-        LabData.longitude.isnot(None)
+    # Get facilities with coordinates
+    facilities = Facility.query.filter(
+        Facility.latitude.isnot(None),
+        Facility.longitude.isnot(None)
     ).all()
     
-    for data in lab_data:
-        # Calculate resistance level (percentage of resistant results)
-        antibiograms = data.antibiograms.all()
-        resistant_count = sum(1 for a in antibiograms if a.susceptibility == 'R')
-        resistance_level = (resistant_count / len(antibiograms) * 100) if antibiograms else 0
+    for facility in facilities:
+        # Calculate resistance level at this facility
+        lab_reports = facility.reports.all()
+        resistance_profiles = []
+        for report in lab_reports:
+            resistance_profiles.extend(report.resistance_profiles.all())
+        
+        resistant_count = sum(1 for profile in resistance_profiles if profile.result == 'R')
+        resistance_level = (resistant_count / len(resistance_profiles) * 100) if resistance_profiles else 0
         
         data_point = {
-            'id': data.id,
-            'lat': data.latitude,
-            'lng': data.longitude,
-            'type': 'lab_data',
+            'id': facility.id,
+            'lat': facility.latitude,
+            'lng': facility.longitude,
+            'type': 'facility',
             'resistance_level': resistance_level,
-            'pathogen': data.pathogen.name if data.pathogen else 'Unknown',
-            'date': data.collection_date.strftime('%Y-%m-%d'),
-            'organization': data.organization.name if data.organization else 'Unknown'
-        }
-        data_points.append(data_point)
-    
-    # Also get organization locations
-    orgs = Organization.query.filter(
-        Organization.latitude.isnot(None),
-        Organization.longitude.isnot(None)
-    ).all()
-    
-    for org in orgs:
-        data_point = {
-            'id': f"org_{org.id}",
-            'lat': org.latitude,
-            'lng': org.longitude,
-            'type': 'organization',
-            'name': org.name,
-            'org_type': org.org_type.value if org.org_type else 'Unknown'
+            'name': facility.name,
+            'facility_type': facility.facility_type
         }
         data_points.append(data_point)
     
@@ -123,20 +105,20 @@ def resistance_trends():
         month_end = min(datetime(current_date.year, current_date.month + 1, 1) - timedelta(days=1), end_date)
         
         # Query for that month
-        month_resistant = db.session.query(db.func.count(Antibiogram.id)).join(
-            LabData, Antibiogram.lab_data_id == LabData.id
+        month_resistant = db.session.query(db.func.count(ResistanceProfile.id)).join(
+            LabReport, ResistanceProfile.lab_report_id == LabReport.id
         ).filter(
-            Antibiogram.susceptibility == 'R',
-            LabData.collection_date >= current_date,
-            LabData.collection_date <= month_end
-        ).scalar()
+            ResistanceProfile.result == 'R',
+            LabReport.report_date >= current_date,
+            LabReport.report_date <= month_end
+        ).scalar() or 0
         
-        month_total = db.session.query(db.func.count(Antibiogram.id)).join(
-            LabData, Antibiogram.lab_data_id == LabData.id
+        month_total = db.session.query(db.func.count(ResistanceProfile.id)).join(
+            LabReport, ResistanceProfile.lab_report_id == LabReport.id
         ).filter(
-            LabData.collection_date >= current_date,
-            LabData.collection_date <= month_end
-        ).scalar()
+            LabReport.report_date >= current_date,
+            LabReport.report_date <= month_end
+        ).scalar() or 0
         
         resistance_rate = (month_resistant / month_total * 100) if month_total > 0 else 0
         
@@ -159,13 +141,13 @@ def pathogen_distribution():
     # Get distribution of different pathogens
     results = db.session.query(
         Pathogen.name,
-        db.func.count(LabData.id).label('count')
+        db.func.count(ResistanceProfile.id).label('count')
     ).join(
-        LabData, LabData.pathogen_id == Pathogen.id
+        ResistanceProfile, ResistanceProfile.pathogen_id == Pathogen.id
     ).group_by(
         Pathogen.id
     ).order_by(
-        db.func.count(LabData.id).desc()
+        db.func.count(ResistanceProfile.id).desc()
     ).all()
     
     data = [{'name': name, 'count': count} for name, count in results]
@@ -176,13 +158,15 @@ def pathogen_distribution():
 def antibiotic_effectiveness():
     # Get effectiveness of different antibiotics
     results = db.session.query(
-        Antibiogram.antibiotic_name,
-        db.func.count(Antibiogram.id).label('total'),
-        db.func.sum(db.case([(Antibiogram.susceptibility == 'S', 1)], else_=0)).label('susceptible'),
-        db.func.sum(db.case([(Antibiogram.susceptibility == 'I', 1)], else_=0)).label('intermediate'),
-        db.func.sum(db.case([(Antibiogram.susceptibility == 'R', 1)], else_=0)).label('resistant')
+        Antibiotic.name,
+        db.func.count(ResistanceProfile.id).label('total'),
+        db.func.sum(db.case([(ResistanceProfile.result == 'S', 1)], else_=0)).label('susceptible'),
+        db.func.sum(db.case([(ResistanceProfile.result == 'I', 1)], else_=0)).label('intermediate'),
+        db.func.sum(db.case([(ResistanceProfile.result == 'R', 1)], else_=0)).label('resistant')
+    ).join(
+        ResistanceProfile, ResistanceProfile.antibiotic_id == Antibiotic.id
     ).group_by(
-        Antibiogram.antibiotic_name
+        Antibiotic.id
     ).all()
     
     data = []
@@ -203,17 +187,17 @@ def antibiotic_effectiveness():
 def regional_comparison():
     # Compare resistance rates between regions
     results = db.session.query(
-        Organization.state,
-        db.func.count(Antibiogram.id).label('total'),
-        db.func.sum(db.case([(Antibiogram.susceptibility == 'R', 1)], else_=0)).label('resistant')
+        Facility.state,
+        db.func.count(ResistanceProfile.id).label('total'),
+        db.func.sum(db.case([(ResistanceProfile.result == 'R', 1)], else_=0)).label('resistant')
     ).join(
-        LabData, LabData.organization_id == Organization.id
+        LabReport, LabReport.facility_id == Facility.id
     ).join(
-        Antibiogram, Antibiogram.lab_data_id == LabData.id
+        ResistanceProfile, ResistanceProfile.lab_report_id == LabReport.id
     ).filter(
-        Organization.state.isnot(None)
+        Facility.state.isnot(None)
     ).group_by(
-        Organization.state
+        Facility.state
     ).all()
     
     data = []

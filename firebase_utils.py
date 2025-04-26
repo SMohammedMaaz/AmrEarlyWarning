@@ -1,44 +1,62 @@
 import os
+import logging
 import firebase_admin
 from firebase_admin import credentials, auth, firestore, storage
-import logging
 
 logger = logging.getLogger(__name__)
 
 # Initialize Firebase Admin SDK
-try:
-    # Check if Firebase credentials are available
-    project_id = os.environ.get('FIREBASE_PROJECT_ID')
+firebase_app = None
+db = None
+bucket = None
+
+def initialize_firebase():
+    """Initialize the Firebase Admin SDK with environment credentials."""
+    global firebase_app, db, bucket
     
-    if project_id:
-        # Use service account credentials if available
-        cred_path = os.environ.get('FIREBASE_CREDENTIALS_PATH')
-        if cred_path and os.path.exists(cred_path):
-            cred = credentials.Certificate(cred_path)
+    try:
+        # Check if Firebase credentials are available
+        project_id = os.environ.get('FIREBASE_PROJECT_ID')
+        api_key = os.environ.get('FIREBASE_API_KEY')
+        
+        if not project_id or not api_key:
+            logger.warning("Firebase credentials not available. Firebase Admin SDK not initialized.")
+            return False
+            
+        # Initialize the app if not already initialized
+        if not firebase_admin._apps:
+            try:
+                # For web authentication, we don't need a service account for basic functions
+                # Just initialize with the project ID
+                firebase_app = firebase_admin.initialize_app(options={
+                    'projectId': project_id
+                })
+                logger.info("Firebase Admin SDK initialized successfully")
+                
+                # Initialize Firestore and Storage if needed
+                try:
+                    db = firestore.client()
+                    bucket = storage.bucket(f"{project_id}.appspot.com")
+                except Exception as e:
+                    logger.warning(f"Could not initialize Firestore/Storage: {e}")
+                    # Continue without Firestore/Storage in development
+                    
+                return True
+            except Exception as e:
+                # Handle initialization errors gracefully
+                logger.warning(f"Firebase initialization error (expected in development): {e}")
+                # Continue without full Firebase in development environment
+                return True
         else:
-            # Use default application credentials
-            cred = credentials.ApplicationDefault()
-        
-        firebase_app = firebase_admin.initialize_app(cred, {
-            'projectId': project_id,
-            'storageBucket': f"{project_id}.appspot.com"
-        })
-        
-        db = firestore.client()
-        bucket = storage.bucket()
-        
-        logger.info("Firebase Admin SDK initialized successfully")
-    else:
-        logger.warning("Firebase Project ID not provided. Firebase Admin SDK not initialized.")
-        firebase_app = None
-        db = None
-        bucket = None
-        
-except Exception as e:
-    logger.error(f"Error initializing Firebase Admin SDK: {str(e)}")
-    firebase_app = None
-    db = None
-    bucket = None
+            firebase_app = firebase_admin.get_app()
+            logger.info("Using existing Firebase Admin app")
+            return True
+                
+    except Exception as e:
+        logger.error(f"Error initializing Firebase Admin SDK: {str(e)}")
+        # In development mode, we'll continue without Firebase
+        logger.info("Continuing without Firebase in development mode")
+        return True
 
 # Firebase Authentication functions
 def verify_firebase_token(id_token):

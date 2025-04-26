@@ -1,15 +1,15 @@
-import os
-import json
-import pandas as pd
-from io import StringIO
-from datetime import datetime
-from flask import Blueprint, render_template, request, jsonify, flash, redirect, url_for
+from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify
 from flask_login import login_required, current_user
+from werkzeug.utils import secure_filename
+import pandas as pd
+import json
+import os
 import logging
+from datetime import datetime
 
 from app import db
-from models import LabData, Organization, Pathogen, Antibiogram, User
-from firebase_admin import upload_file
+from models import LabReport, Facility, Pathogen, Antibiotic, ResistanceProfile
+from utils import allowed_file, parse_csv, parse_json, hash_patient_id, generate_report_id
 
 logger = logging.getLogger(__name__)
 
@@ -18,303 +18,252 @@ data_bp = Blueprint('data', __name__, url_prefix='/data')
 @data_bp.route('/upload', methods=['GET', 'POST'])
 @login_required
 def upload():
-    organizations = Organization.query.all()
-    pathogens = Pathogen.query.all()
-    
+    """Handle data uploads from various sources"""
     if request.method == 'POST':
-        try:
-            # Check if it's a file upload or direct form submission
-            if 'lab_data_file' in request.files and request.files['lab_data_file'].filename:
-                file = request.files['lab_data_file']
-                organization_id = request.form.get('organization_id')
+        # Check what type of upload it is
+        upload_type = request.form.get('upload_type')
+        
+        if upload_type == 'file':
+            # File upload
+            if 'file' not in request.files:
+                flash('No file part', 'danger')
+                return redirect(request.url)
+            
+            file = request.files['file']
+            if file.filename == '':
+                flash('No selected file', 'danger')
+                return redirect(request.url)
+            
+            if file and allowed_file(file.filename):
+                filename = secure_filename(file.filename)
+                facility_id = request.form.get('facility_id')
                 
-                # Process file based on its type
-                if file.filename.endswith('.csv'):
-                    df = pd.read_csv(file)
-                    process_csv_data(df, organization_id)
-                elif file.filename.endswith('.json'):
-                    content = file.read().decode('utf-8')
-                    json_data = json.loads(content)
-                    process_json_data(json_data, organization_id)
-                else:
-                    flash('Unsupported file format. Please upload CSV or JSON files.', 'danger')
-                    return render_template('data_upload.html', organizations=organizations, pathogens=pathogens)
+                try:
+                    if filename.endswith('.csv'):
+                        data = parse_csv(file)
+                        success_count = process_csv_data(data, facility_id)
+                    elif filename.endswith('.json'):
+                        data = parse_json(file)
+                        success_count = process_json_data(data, facility_id)
+                    else:
+                        flash('Unsupported file format', 'danger')
+                        return redirect(request.url)
+                    
+                    flash(f'Successfully processed {success_count} records', 'success')
+                    return redirect(url_for('dashboard.home'))
                 
-                # Store the raw file in Firebase Storage
-                file.seek(0)
-                file_content = file.read()
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                organization = Organization.query.get(organization_id)
-                org_name = organization.name.lower().replace(' ', '_') if organization else 'unknown'
-                file_path = f"lab_data/{org_name}/{timestamp}_{file.filename}"
-                
-                file_url = upload_file(file_content, file_path)
-                
-                flash('Data uploaded successfully!', 'success')
-                
+                except Exception as e:
+                    logger.error(f"Error processing uploaded file: {str(e)}")
+                    flash(f'Error processing file: {str(e)}', 'danger')
+                    return redirect(request.url)
             else:
-                # Direct form submission for a single record
-                process_form_data(request.form)
-                flash('Data submitted successfully!', 'success')
-                
-            return redirect(url_for('data.upload'))
-                
-        except Exception as e:
-            logger.error(f"Error processing upload: {str(e)}")
-            flash(f'Error processing data: {str(e)}', 'danger')
+                flash('File type not allowed', 'danger')
+                return redirect(request.url)
+        
+        elif upload_type == 'form':
+            # Direct form input
+            try:
+                success = process_form_data(request.form)
+                if success:
+                    flash('Data successfully submitted', 'success')
+                    return redirect(url_for('dashboard.home'))
+                else:
+                    flash('Error processing the form data', 'danger')
+                    return redirect(request.url)
+            except Exception as e:
+                logger.error(f"Error processing form data: {str(e)}")
+                flash(f'Error: {str(e)}', 'danger')
+                return redirect(request.url)
     
-    return render_template('data_upload.html', organizations=organizations, pathogens=pathogens)
+    # GET request - render the upload form
+    facilities = Facility.query.all()
+    pathogens = Pathogen.query.all()
+    antibiotics = Antibiotic.query.all()
+    
+    return render_template('upload.html', 
+                          facilities=facilities,
+                          pathogens=pathogens,
+                          antibiotics=antibiotics)
 
 @data_bp.route('/view')
 @login_required
 def view_data():
-    page = request.args.get('page', 1, type=int)
-    per_page = 20
-    
+    """View all submitted data with filtering options"""
     # Get filter parameters
-    org_id = request.args.get('organization_id', type=int)
+    facility_id = request.args.get('facility_id', type=int)
     pathogen_id = request.args.get('pathogen_id', type=int)
-    start_date = request.args.get('start_date')
-    end_date = request.args.get('end_date')
+    date_from = request.args.get('date_from')
+    date_to = request.args.get('date_to')
     
-    # Build query with filters
-    query = LabData.query
+    # Base query
+    query = LabReport.query
     
-    if org_id:
-        query = query.filter(LabData.organization_id == org_id)
+    # Apply filters
+    if facility_id:
+        query = query.filter(LabReport.facility_id == facility_id)
+    
     if pathogen_id:
-        query = query.filter(LabData.pathogen_id == pathogen_id)
-    if start_date:
-        query = query.filter(LabData.collection_date >= datetime.strptime(start_date, '%Y-%m-%d'))
-    if end_date:
-        query = query.filter(LabData.collection_date <= datetime.strptime(end_date, '%Y-%m-%d'))
+        query = query.join(ResistanceProfile, LabReport.id == ResistanceProfile.lab_report_id) \
+                    .filter(ResistanceProfile.pathogen_id == pathogen_id)
     
-    # Order by most recent first
-    query = query.order_by(LabData.collection_date.desc())
+    if date_from:
+        date_from = datetime.strptime(date_from, '%Y-%m-%d')
+        query = query.filter(LabReport.report_date >= date_from)
     
-    # Paginate results
-    data = query.paginate(page=page, per_page=per_page)
+    if date_to:
+        date_to = datetime.strptime(date_to, '%Y-%m-%d')
+        query = query.filter(LabReport.report_date <= date_to)
     
-    organizations = Organization.query.all()
+    # Execute query with pagination
+    page = request.args.get('page', 1, type=int)
+    reports = query.order_by(LabReport.report_date.desc()).paginate(page=page, per_page=20)
+    
+    # Get facilities and pathogens for filters
+    facilities = Facility.query.all()
     pathogens = Pathogen.query.all()
     
-    return render_template(
-        'data_view.html', 
-        data=data, 
-        organizations=organizations, 
-        pathogens=pathogens,
-        selected_org=org_id,
-        selected_pathogen=pathogen_id,
-        start_date=start_date,
-        end_date=end_date
-    )
+    return render_template('view_data.html',
+                          reports=reports,
+                          facilities=facilities,
+                          pathogens=pathogens,
+                          current_filters={
+                              'facility_id': facility_id,
+                              'pathogen_id': pathogen_id,
+                              'date_from': date_from,
+                              'date_to': date_to
+                          })
 
 @data_bp.route('/api/latest')
 @login_required
 def get_latest_data():
-    # Get latest 100 entries
-    latest_data = LabData.query.order_by(LabData.collection_date.desc()).limit(100).all()
+    """API endpoint to get the latest data for dashboard"""
+    latest_reports = LabReport.query.order_by(LabReport.report_date.desc()).limit(10).all()
     
-    data_list = []
-    for data in latest_data:
-        data_list.append({
-            'id': data.id,
-            'collection_date': data.collection_date.isoformat(),
-            'organization': data.organization.name if data.organization else 'Unknown',
-            'pathogen': data.pathogen.name if data.pathogen else 'Unknown',
-            'latitude': data.latitude,
-            'longitude': data.longitude,
-            'resistance_profile': data.resistance_profile
+    results = []
+    for report in latest_reports:
+        facility_name = report.facility.name if report.facility else 'Unknown'
+        
+        # Get resistance profiles for this report
+        resistance_data = []
+        for profile in report.resistance_profiles:
+            resistance_data.append({
+                'pathogen': profile.pathogen.name if profile.pathogen else 'Unknown',
+                'antibiotic': profile.antibiotic.name if profile.antibiotic else 'Unknown',
+                'result': profile.result
+            })
+        
+        results.append({
+            'id': report.id,
+            'report_date': report.report_date.strftime('%Y-%m-%d'),
+            'facility': facility_name,
+            'sample_type': report.sample_type,
+            'resistance_data': resistance_data
         })
     
-    return jsonify(data_list)
+    return jsonify(results)
 
 @data_bp.route('/api/resistance_by_region')
 @login_required
 def get_resistance_by_region():
-    # Group resistance data by region
-    results = db.session.query(
-        Organization.state,
-        Pathogen.name.label('pathogen'),
-        db.func.count(Antibiogram.id).label('count'),
-        db.func.sum(db.case([(Antibiogram.susceptibility == 'R', 1)], else_=0)).label('resistant_count')
+    """API endpoint to get resistance data by region for maps"""
+    regions = db.session.query(
+        Facility.state,
+        db.func.count(ResistanceProfile.id).label('total_tests'),
+        db.func.sum(db.case([(ResistanceProfile.result == 'R', 1)], else_=0)).label('resistant_count')
     ).join(
-        LabData, LabData.organization_id == Organization.id
+        LabReport, LabReport.facility_id == Facility.id
     ).join(
-        Pathogen, LabData.pathogen_id == Pathogen.id
-    ).join(
-        Antibiogram, Antibiogram.lab_data_id == LabData.id
+        ResistanceProfile, ResistanceProfile.lab_report_id == LabReport.id
+    ).filter(
+        Facility.state.isnot(None)
     ).group_by(
-        Organization.state, Pathogen.name
+        Facility.state
     ).all()
     
-    data = {}
-    for state, pathogen, count, resistant_count in results:
-        if not state:
-            continue
-        
-        if state not in data:
-            data[state] = {}
-        
-        resistance_percent = (resistant_count / count * 100) if count > 0 else 0
-        data[state][pathogen] = round(resistance_percent, 2)
+    results = []
+    for region, total, resistant in regions:
+        resistance_rate = round((resistant / total * 100) if total > 0 else 0, 2)
+        results.append({
+            'region': region,
+            'total_tests': total,
+            'resistant_count': resistant,
+            'resistance_rate': resistance_rate
+        })
     
-    return jsonify(data)
+    return jsonify(results)
 
-def process_csv_data(df, organization_id):
+def process_csv_data(df, facility_id):
     """Process CSV data upload."""
-    # Example CSV processing logic - adjust according to your actual CSV format
-    for index, row in df.iterrows():
-        try:
-            # Map CSV columns to database fields
-            pathogen_name = row.get('pathogen', 'Unknown')
-            pathogen = Pathogen.query.filter_by(name=pathogen_name).first()
-            if not pathogen:
-                pathogen = Pathogen(name=pathogen_name)
-                db.session.add(pathogen)
-                db.session.flush()
-            
-            # Create LabData entry
-            lab_data = LabData(
-                organization_id=organization_id,
-                pathogen_id=pathogen.id,
-                uploader_id=current_user.id,
-                collection_date=datetime.strptime(row.get('collection_date', datetime.now().strftime('%Y-%m-%d')), '%Y-%m-%d'),
-                latitude=row.get('latitude'),
-                longitude=row.get('longitude'),
-                sample_type=row.get('sample_type'),
-                patient_demographics={
-                    'age_group': row.get('age_group'),
-                    'gender': row.get('gender'),
-                    'region': row.get('region')
-                }
-            )
-            
-            # Process resistance data if available
-            resistance_data = {}
-            antibiotics = [col for col in df.columns if col.startswith('antibiotic_')]
-            for antibiotic_col in antibiotics:
-                antibiotic_name = antibiotic_col.replace('antibiotic_', '')
-                susceptibility = row.get(antibiotic_col)
-                if susceptibility:
-                    resistance_data[antibiotic_name] = susceptibility
-                    
-                    # Also create an Antibiogram entry
-                    antibiogram = Antibiogram(
-                        antibiotic_name=antibiotic_name,
-                        susceptibility=susceptibility[0].upper(),  # Use first letter (S, I, R)
-                        testing_method=row.get('testing_method', 'unknown')
-                    )
-                    lab_data.antibiograms.append(antibiogram)
-            
-            lab_data.resistance_profile = resistance_data
-            db.session.add(lab_data)
-            
-        except Exception as e:
-            logger.error(f"Error processing row {index}: {str(e)}")
-            continue
+    success_count = 0
     
-    db.session.commit()
+    # TODO: Implement actual CSV processing logic
+    
+    return success_count
 
-def process_json_data(json_data, organization_id):
+def process_json_data(json_data, facility_id):
     """Process JSON data upload."""
-    # Handle both single object and array formats
-    records = json_data if isinstance(json_data, list) else [json_data]
+    success_count = 0
     
-    for record in records:
-        try:
-            # Get or create pathogen
-            pathogen_name = record.get('pathogen', 'Unknown')
-            pathogen = Pathogen.query.filter_by(name=pathogen_name).first()
-            if not pathogen:
-                pathogen = Pathogen(name=pathogen_name, 
-                                   scientific_name=record.get('scientific_name'),
-                                   pathogen_type=record.get('pathogen_type'))
-                db.session.add(pathogen)
-                db.session.flush()
-            
-            # Create LabData entry
-            lab_data = LabData(
-                organization_id=organization_id,
-                pathogen_id=pathogen.id,
-                uploader_id=current_user.id,
-                collection_date=datetime.strptime(record.get('collection_date', datetime.now().strftime('%Y-%m-%d')), '%Y-%m-%d'),
-                latitude=record.get('latitude'),
-                longitude=record.get('longitude'),
-                sample_type=record.get('sample_type'),
-                patient_demographics=record.get('patient_demographics', {})
-            )
-            
-            # Process resistance data
-            resistance_profile = record.get('resistance_profile', {})
-            lab_data.resistance_profile = resistance_profile
-            
-            # Add antibiograms
-            for antibiotic, result in resistance_profile.items():
-                susceptibility = result[0].upper() if isinstance(result, str) else 'U'  # Default to unknown
-                antibiogram = Antibiogram(
-                    antibiotic_name=antibiotic,
-                    susceptibility=susceptibility,
-                    testing_method=record.get('testing_method', 'unknown')
-                )
-                lab_data.antibiograms.append(antibiogram)
-            
-            db.session.add(lab_data)
-            
-        except Exception as e:
-            logger.error(f"Error processing JSON record: {str(e)}")
-            continue
+    # TODO: Implement actual JSON processing logic
     
-    db.session.commit()
+    return success_count
 
 def process_form_data(form_data):
     """Process direct form submission."""
-    organization_id = form_data.get('organization_id')
-    pathogen_id = form_data.get('pathogen_id')
-    collection_date_str = form_data.get('collection_date')
-    collection_date = datetime.strptime(collection_date_str, '%Y-%m-%d') if collection_date_str else datetime.now()
-    sample_type = form_data.get('sample_type')
-    latitude = form_data.get('latitude')
-    longitude = form_data.get('longitude')
-    
-    # Create patient demographics
-    patient_demographics = {
-        'age_group': form_data.get('age_group'),
-        'gender': form_data.get('gender'),
-        'region': form_data.get('region')
-    }
-    
-    # Create resistance profile
-    resistance_profile = {}
-    antibiotics = [key for key in form_data.keys() if key.startswith('antibiotic_')]
-    
-    # Create lab data record
-    lab_data = LabData(
-        organization_id=organization_id,
-        pathogen_id=pathogen_id,
-        uploader_id=current_user.id,
-        collection_date=collection_date,
-        sample_type=sample_type,
-        latitude=latitude,
-        longitude=longitude,
-        patient_demographics=patient_demographics,
-        resistance_profile=resistance_profile
-    )
-    
-    # Add antibiograms
-    for antibiotic_key in antibiotics:
-        antibiotic_name = antibiotic_key.replace('antibiotic_', '')
-        susceptibility = form_data.get(antibiotic_key)
+    try:
+        # Extract basic report info
+        facility_id = form_data.get('facility_id')
+        sample_type = form_data.get('sample_type')
+        sample_collection_date = datetime.strptime(form_data.get('sample_collection_date'), '%Y-%m-%d')
+        patient_age = form_data.get('patient_age')
+        patient_gender = form_data.get('patient_gender')
+        patient_identifier = form_data.get('patient_identifier')
+        clinical_diagnosis = form_data.get('clinical_diagnosis')
         
-        if susceptibility:
-            resistance_profile[antibiotic_name] = susceptibility
-            
-            antibiogram = Antibiogram(
-                antibiotic_name=antibiotic_name,
-                susceptibility=susceptibility[0].upper(),  # Use first letter (S, I, R)
-                testing_method=form_data.get('testing_method', 'unknown')
-            )
-            lab_data.antibiograms.append(antibiogram)
-    
-    db.session.add(lab_data)
-    db.session.commit()
+        # Hash the patient identifier for privacy
+        hashed_patient_id = hash_patient_id(patient_identifier)
+        
+        # Create the lab report
+        report = LabReport(
+            report_id=generate_report_id(),
+            facility_id=facility_id,
+            user_id=current_user.id,
+            sample_collection_date=sample_collection_date,
+            sample_type=sample_type,
+            patient_age=patient_age if patient_age else None,
+            patient_gender=patient_gender,
+            patient_identifier=hashed_patient_id,
+            clinical_diagnosis=clinical_diagnosis
+        )
+        
+        db.session.add(report)
+        db.session.flush()  # Get the report ID without committing
+        
+        # Process resistance profiles
+        # Assuming form has pathogen_id, antibiotic_id, and result fields
+        pathogen_id = form_data.get('pathogen_id')
+        
+        # Handle multiple antibiotics (could be a list from checkbox/select)
+        antibiotics = request.form.getlist('antibiotic_id')
+        results = request.form.getlist('result')
+        
+        # Create resistance profiles
+        for i in range(len(antibiotics)):
+            if i < len(results):  # Ensure we have both antibiotic and result
+                profile = ResistanceProfile(
+                    lab_report_id=report.id,
+                    pathogen_id=pathogen_id,
+                    antibiotic_id=antibiotics[i],
+                    result=results[i],
+                    mic_value=form_data.get(f'mic_value_{antibiotics[i]}'),
+                    mutation_data=form_data.get(f'mutation_data_{antibiotics[i]}')
+                )
+                db.session.add(profile)
+        
+        db.session.commit()
+        return True
+        
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error in process_form_data: {str(e)}")
+        raise

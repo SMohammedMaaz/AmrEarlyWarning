@@ -5,8 +5,6 @@ from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy.orm import DeclarativeBase
 from werkzeug.middleware.proxy_fix import ProxyFix
 from flask_login import LoginManager
-import firebase_admin
-from firebase_admin import credentials
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
@@ -21,7 +19,7 @@ login_manager = LoginManager()
 
 # Create the Flask application
 app = Flask(__name__)
-app.secret_key = os.environ.get("SESSION_SECRET")
+app.secret_key = os.environ.get("SESSION_SECRET", "development-key")
 app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
 
 # Configure the database
@@ -32,24 +30,23 @@ app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
 }
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
-# Initialize Firebase Admin SDK
+# Make Firebase configuration available to templates
+app.config["FIREBASE_API_KEY"] = os.environ.get("FIREBASE_API_KEY")
+app.config["FIREBASE_PROJECT_ID"] = os.environ.get("FIREBASE_PROJECT_ID")
+app.config["FIREBASE_APP_ID"] = os.environ.get("FIREBASE_APP_ID")
+
+# Initialize Firebase
 try:
-    # Check if running in a production environment with Firebase credentials
-    if os.environ.get("FIREBASE_PROJECT_ID"):
-        cred = credentials.Certificate({
-            "type": "service_account",
-            "project_id": os.environ.get("FIREBASE_PROJECT_ID"),
-            "private_key": os.environ.get("FIREBASE_PRIVATE_KEY", "").replace("\\n", "\n"),
-            "client_email": os.environ.get("FIREBASE_CLIENT_EMAIL"),
-        })
-        firebase_admin.initialize_app(cred)
-        app.config["FIREBASE_INITIALIZED"] = True
+    import firebase_utils
+    firebase_initialized = firebase_utils.initialize_firebase()
+    app.config["FIREBASE_INITIALIZED"] = firebase_initialized
+    if firebase_initialized:
+        logging.info("Firebase initialized successfully")
     else:
-        app.config["FIREBASE_INITIALIZED"] = False
-        logging.warning("Firebase credentials not found. Firebase functionality will be limited.")
+        logging.warning("Firebase initialization failed")
 except Exception as e:
     app.config["FIREBASE_INITIALIZED"] = False
-    logging.error(f"Failed to initialize Firebase: {e}")
+    logging.error(f"Error initializing Firebase: {e}")
 
 # Initialize extensions with app
 db.init_app(app)
@@ -64,7 +61,13 @@ with app.app_context():
     db.create_all()
 
 # Import and register blueprints
-from routes import auth_bp, dashboard_bp, data_bp, alerts_bp, admin_bp, treatment_bp
+from routes.auth import auth_bp
+from routes.dashboard import dashboard_bp
+from routes.data import data_bp
+from routes.alerts import alerts_bp
+from routes.admin import admin_bp
+from routes.treatment import treatment_bp
+
 app.register_blueprint(auth_bp)
 app.register_blueprint(dashboard_bp)
 app.register_blueprint(data_bp)
@@ -77,6 +80,13 @@ app.register_blueprint(treatment_bp)
 def load_user(user_id):
     from models import User
     return User.query.get(int(user_id))
+
+# Add route for the root URL
+from flask import redirect, url_for
+
+@app.route('/')
+def index():
+    return redirect(url_for('auth.login'))
 
 # Import error handlers
 import routes
