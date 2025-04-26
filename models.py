@@ -22,7 +22,8 @@ class User(UserMixin, db.Model):
     firebase_uid = db.Column(db.String(128), unique=True)
     role = db.Column(db.Enum(UserRole), nullable=False, default=UserRole.LAB_TECHNICIAN)
     full_name = db.Column(db.String(100))
-    organization = db.Column(db.String(100))
+    # organization field removed to match existing database schema
+    profile_picture = db.Column(db.String(255))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     last_login = db.Column(db.DateTime)
     phone_number = db.Column(db.String(20))

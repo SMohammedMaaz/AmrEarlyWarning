@@ -1,4 +1,5 @@
 import os
+import datetime
 from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify, session
 from flask_login import login_user, logout_user, login_required, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -209,6 +210,73 @@ def edit_user(user_id):
         return redirect(url_for('auth.list_users'))
     
     return render_template('admin/edit_user.html', user=user, roles=UserRole)
+
+@auth_bp.route('/firebase-auth', methods=['POST'])
+def firebase_auth():
+    try:
+        data = request.get_json()
+        id_token = data.get('idToken')
+        firebase_uid = data.get('uid')
+        email = data.get('email')
+        display_name = data.get('displayName')
+        
+        # Verify the token
+        decoded_token = verify_firebase_token(id_token)
+        
+        # For development, provide a fallback if verification fails
+        if not decoded_token and app.config.get('DEBUG', False):
+            logger.info("Using development fallback for Firebase auth")
+            # Continue with the data provided by the client
+        elif not decoded_token:
+            return jsonify({'success': False, 'error': 'Invalid token'}), 401
+        
+        # Find or create user
+        user = User.query.filter_by(firebase_uid=firebase_uid).first()
+        
+        if not user:
+            # Check if user exists by email
+            user = User.query.filter_by(email=email).first()
+            
+            if user:
+                # Link existing user with Firebase
+                user.firebase_uid = firebase_uid
+                db.session.commit()
+            else:
+                # Create new user
+                username = email.split('@')[0]
+                # Ensure username is unique
+                base_username = username
+                count = 1
+                while User.query.filter_by(username=username).first():
+                    username = f"{base_username}{count}"
+                    count += 1
+                
+                user = User(
+                    username=username,
+                    email=email,
+                    firebase_uid=firebase_uid,
+                    full_name=display_name,
+                    role=UserRole.LAB_TECHNICIAN  # Default role
+                )
+                db.session.add(user)
+                db.session.commit()
+        
+        # Login the user
+        login_user(user)
+        user.last_login = datetime.datetime.utcnow()
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'redirect': url_for('dashboard.home')
+        })
+    
+    except Exception as e:
+        logger.error(f"Firebase auth error: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
 
 @auth_bp.route('/api/verify_token', methods=['POST'])
 def verify_token():

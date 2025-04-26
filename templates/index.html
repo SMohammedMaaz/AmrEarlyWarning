@@ -5,8 +5,8 @@
 {% block head %}
 <!-- Firebase SDK -->
 <script type="module">
-    import { initializeApp } from 'https://www.gstatic.com/firebasejs/11.0.2/firebase-app.js';
-    import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, signInWithPopup, GoogleAuthProvider } from 'https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js';
+    import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.0/firebase-app.js';
+    import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, signInWithPopup, GoogleAuthProvider } from 'https://www.gstatic.com/firebasejs/10.7.0/firebase-auth.js';
     
     // Initialize Firebase with your credentials
     const firebaseConfig = {
@@ -166,7 +166,7 @@
                     })
                     .then((idToken) => {
                         // Send token to backend
-                        return fetch('/firebase-auth', {
+                        return fetch('/auth/firebase-auth', {
                             method: 'POST',
                             headers: {
                                 'Content-Type': 'application/json'
@@ -203,7 +203,7 @@
                     })
                     .then((idToken) => {
                         // Send token to backend
-                        return fetch('/firebase-auth', {
+                        return fetch('/auth/firebase-auth', {
                             method: 'POST',
                             headers: {
                                 'Content-Type': 'application/json'
@@ -248,7 +248,7 @@
                     })
                     .then((idToken) => {
                         // Send token and additional info to backend
-                        return fetch('/firebase-auth', {
+                        return fetch('/auth/firebase-auth', {
                             method: 'POST',
                             headers: {
                                 'Content-Type': 'application/json'
@@ -289,7 +289,7 @@
                         const organization = document.getElementById('registerOrganization').value || '';
                         
                         // Send token to backend
-                        return fetch('/firebase-auth', {
+                        return fetch('/auth/firebase-auth', {
                             method: 'POST',
                             headers: {
                                 'Content-Type': 'application/json'
