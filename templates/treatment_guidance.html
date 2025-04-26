@@ -1,0 +1,345 @@
+{% extends "layout.html" %}
+
+{% block title %}AMR Network - Treatment Guidance{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col">
+        <h1><i class="fas fa-pills text-primary me-2"></i>Treatment Guidance</h1>
+        <p class="text-muted">Evidence-based antibiotic recommendations based on local resistance patterns</p>
+    </div>
+</div>
+
+{% if pathogen %}
+<!-- Detailed view for a specific pathogen -->
+<div class="row mb-4">
+    <div class="col-12">
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb">
+                <li class="breadcrumb-item"><a href="{{ url_for('treatment.treatment_guidance') }}">All Pathogens</a></li>
+                <li class="breadcrumb-item active" aria-current="page">{{ pathogen.name }}</li>
+            </ol>
+        </nav>
+        
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">
+                    <i class="fas fa-bacteria text-danger me-2"></i>{{ pathogen.name }}
+                    {% if pathogen.scientific_name %}
+                    <span class="text-muted ms-2 small fst-italic">{{ pathogen.scientific_name }}</span>
+                    {% endif %}
+                </h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-6">
+                        <h6>Pathogen Information</h6>
+                        <table class="table table-sm">
+                            <tr>
+                                <th width="30%">Type</th>
+                                <td>{{ pathogen.pathogen_type or 'Not specified' }}</td>
+                            </tr>
+                            {% if pathogen.description %}
+                            <tr>
+                                <th>Description</th>
+                                <td>{{ pathogen.description }}</td>
+                            </tr>
+                            {% endif %}
+                        </table>
+                        
+                        <h6 class="mt-4">Current Resistance Profile</h6>
+                        {% if resistance_stats %}
+                        <div class="table-responsive">
+                            <table class="table table-sm table-hover">
+                                <thead>
+                                    <tr>
+                                        <th>Antibiotic</th>
+                                        <th>Resistance</th>
+                                        <th>Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for stat in resistance_stats|sort(attribute='percentage', reverse=true) %}
+                                    <tr>
+                                        <td>{{ stat.antibiotic }}</td>
+                                        <td>
+                                            <div class="d-flex align-items-center">
+                                                <div class="progress flex-grow-1 me-2" style="height: 10px;">
+                                                    <div class="progress-bar 
+                                                        {% if stat.percentage >= 75 %}bg-danger
+                                                        {% elif stat.percentage >= 50 %}bg-warning
+                                                        {% elif stat.percentage >= 25 %}bg-info
+                                                        {% else %}bg-success{% endif %}" 
+                                                        role="progressbar" 
+                                                        style="width: {{ stat.percentage }}%;" 
+                                                        aria-valuenow="{{ stat.percentage }}" 
+                                                        aria-valuemin="0" 
+                                                        aria-valuemax="100">
+                                                    </div>
+                                                </div>
+                                                <span>{{ stat.percentage }}%</span>
+                                            </div>
+                                            <div class="small text-muted">
+                                                {{ stat.resistant }} / {{ stat.total }} isolates
+                                            </div>
+                                        </td>
+                                        <td>
+                                            {% if stat.percentage >= 75 %}
+                                            <span class="badge bg-danger">Avoid</span>
+                                            {% elif stat.percentage >= 50 %}
+                                            <span class="badge bg-warning text-dark">High Risk</span>
+                                            {% elif stat.percentage >= 25 %}
+                                            <span class="badge bg-info">Moderate Risk</span>
+                                            {% else %}
+                                            <span class="badge bg-success">Effective</span>
+                                            {% endif %}
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        {% else %}
+                        <div class="alert alert-info">
+                            <i class="fas fa-info-circle me-2"></i>No resistance data available for this pathogen
+                        </div>
+                        {% endif %}
+                    </div>
+                    
+                    <div class="col-md-6">
+                        <h6>Resistance Visualization</h6>
+                        <canvas id="antibioticResistanceChart" data-pathogen-id="{{ pathogen.id }}" height="250"></canvas>
+                        
+                        <h6 class="mt-4">Treatment Guidelines</h6>
+                        {% if guidelines %}
+                        <div class="accordion" id="guidelinesAccordion">
+                            {% for guideline in guidelines %}
+                            <div class="accordion-item">
+                                <h2 class="accordion-header" id="heading{{ guideline.id }}">
+                                    <button class="accordion-button {{ '' if loop.first else 'collapsed' }}" type="button" data-bs-toggle="collapse" data-bs-target="#collapse{{ guideline.id }}" aria-expanded="{{ 'true' if loop.first else 'false' }}" aria-controls="collapse{{ guideline.id }}">
+                                        {{ guideline.condition }}
+                                    </button>
+                                </h2>
+                                <div id="collapse{{ guideline.id }}" class="accordion-collapse collapse {{ 'show' if loop.first else '' }}" aria-labelledby="heading{{ guideline.id }}">
+                                    <div class="accordion-body">
+                                        <h6>First Line Treatment</h6>
+                                        <p>{{ guideline.first_line_treatment }}</p>
+                                        
+                                        {% if guideline.alternative_treatments %}
+                                        <h6>Alternative Treatments</h6>
+                                        <p>{{ guideline.alternative_treatments }}</p>
+                                        {% endif %}
+                                        
+                                        {% if guideline.notes %}
+                                        <h6>Notes</h6>
+                                        <p>{{ guideline.notes }}</p>
+                                        {% endif %}
+                                        
+                                        <div class="small text-muted mt-3">
+                                            <i class="fas fa-info-circle me-1"></i>
+                                            Source: {{ guideline.source or 'Not specified' }}
+                                            {% if guideline.published_date %}
+                                            | Published: {{ guideline.published_date.strftime('%Y-%m-%d') }}
+                                            {% endif %}
+                                            {% if guideline.last_updated %}
+                                            | Last Updated: {{ guideline.last_updated.strftime('%Y-%m-%d') }}
+                                            {% endif %}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                        {% else %}
+                        <div class="alert alert-warning">
+                            <i class="fas fa-exclamation-triangle me-2"></i>No treatment guidelines available for this pathogen
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% else %}
+<!-- Overview of all pathogens -->
+<div class="row mb-4">
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="fas fa-bacteria me-2"></i>Pathogen Database</h5>
+            </div>
+            <div class="card-body">
+                <div class="row mb-3">
+                    <div class="col">
+                        <div class="input-group">
+                            <input type="text" class="form-control" id="pathogen-search" placeholder="Search pathogens...">
+                            <button class="btn btn-outline-secondary" type="button" id="search-btn">
+                                <i class="fas fa-search"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="table-responsive">
+                    <table class="table table-hover" id="pathogens-table">
+                        <thead>
+                            <tr>
+                                <th>Pathogen</th>
+                                <th>Type</th>
+                                <th>Resistance Level</th>
+                                <th>Guidelines</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for pathogen in pathogens %}
+                            <tr>
+                                <td>
+                                    <strong>{{ pathogen.name }}</strong>
+                                    {% if pathogen.scientific_name %}
+                                    <div class="small text-muted fst-italic">{{ pathogen.scientific_name }}</div>
+                                    {% endif %}
+                                </td>
+                                <td>{{ pathogen.pathogen_type or 'Unknown' }}</td>
+                                <td>
+                                    {% set resistance_level = 35 %}  <!-- This would come from the backend -->
+                                    <div class="d-flex align-items-center">
+                                        <div class="progress flex-grow-1 me-2" style="height: 10px;">
+                                            <div class="progress-bar 
+                                                {% if resistance_level >= 75 %}bg-danger
+                                                {% elif resistance_level >= 50 %}bg-warning
+                                                {% elif resistance_level >= 25 %}bg-info
+                                                {% else %}bg-success{% endif %}" 
+                                                role="progressbar" 
+                                                style="width: {{ resistance_level }}%;" 
+                                                aria-valuenow="{{ resistance_level }}" 
+                                                aria-valuemin="0" 
+                                                aria-valuemax="100">
+                                            </div>
+                                        </div>
+                                        <span>{{ resistance_level }}%</span>
+                                    </div>
+                                </td>
+                                <td>
+                                    {% if guidelines|selectattr('pathogen_id', 'equalto', pathogen.id)|list|length > 0 %}
+                                    <span class="badge bg-success">Available</span>
+                                    {% else %}
+                                    <span class="badge bg-secondary">None</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <a href="{{ url_for('treatment.pathogen_guidance', pathogen_id=pathogen.id) }}" class="btn btn-sm btn-primary">
+                                        <i class="fas fa-pills me-1"></i>View
+                                    </a>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-4">
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="fas fa-info-circle me-2"></i>About Guidance</h5>
+            </div>
+            <div class="card-body">
+                <p>The treatment recommendations provided here are based on:</p>
+                <ul>
+                    <li>Local antimicrobial resistance patterns</li>
+                    <li>Latest clinical guidelines from WHO and national health authorities</li>
+                    <li>Real-time resistance data analysis</li>
+                </ul>
+                
+                <div class="alert alert-warning">
+                    <i class="fas fa-exclamation-triangle me-2"></i>
+                    <strong>Important:</strong> These recommendations are meant to assist clinical decision-making but should not replace professional medical judgment.
+                </div>
+                
+                <p>The resistance levels are categorized as follows:</p>
+                <ul>
+                    <li><span class="badge bg-success">Low</span>: &lt; 25% resistance</li>
+                    <li><span class="badge bg-info">Medium</span>: 25-50% resistance</li>
+                    <li><span class="badge bg-warning text-dark">High</span>: 50-75% resistance</li>
+                    <li><span class="badge bg-danger">Very High</span>: &gt; 75% resistance</li>
+                </ul>
+            </div>
+        </div>
+        
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="fas fa-chart-line me-2"></i>Top Concerns</h5>
+            </div>
+            <div class="card-body">
+                <h6>Critical Resistance Alerts</h6>
+                <div class="list-group mb-3">
+                    <div class="list-group-item list-group-item-danger">
+                        <div class="d-flex w-100 justify-content-between">
+                            <h6 class="mb-1">MRSA in Northern Region</h6>
+                            <small>2 days ago</small>
+                        </div>
+                        <p class="mb-1">87% resistance to common antibiotics</p>
+                    </div>
+                    <div class="list-group-item list-group-item-warning">
+                        <div class="d-flex w-100 justify-content-between">
+                            <h6 class="mb-1">CRE in Central District</h6>
+                            <small>5 days ago</small>
+                        </div>
+                        <p class="mb-1">68% resistance to carbapenems</p>
+                    </div>
+                </div>
+                
+                <h6>Emerging Trends</h6>
+                <div class="alert alert-info">
+                    <i class="fas fa-chart-line me-2"></i>
+                    <strong>Rising Concern:</strong> Increase in fluoroquinolone resistance in E. coli isolates over the past 30 days.
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/charts.js') }}"></script>
+<script>
+    // Search functionality for pathogen table
+    document.addEventListener('DOMContentLoaded', function() {
+        const searchInput = document.getElementById('pathogen-search');
+        const searchBtn = document.getElementById('search-btn');
+        const table = document.getElementById('pathogens-table');
+        
+        function performSearch() {
+            const searchTerm = searchInput.value.toLowerCase();
+            const rows = table.querySelectorAll('tbody tr');
+            
+            rows.forEach(row => {
+                const pathogenName = row.querySelector('td:first-child').textContent.toLowerCase();
+                if (pathogenName.includes(searchTerm)) {
+                    row.style.display = '';
+                } else {
+                    row.style.display = 'none';
+                }
+            });
+        }
+        
+        if (searchInput) {
+            searchInput.addEventListener('keyup', function(e) {
+                if (e.key === 'Enter') {
+                    performSearch();
+                }
+            });
+        }
+        
+        if (searchBtn) {
+            searchBtn.addEventListener('click', performSearch);
+        }
+    });
+</script>
+{% endblock %}

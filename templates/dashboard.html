@@ -1,0 +1,315 @@
+{% extends "layout.html" %}
+
+{% block title %}AMR Network - Dashboard{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col">
+        <h1><i class="fas fa-chart-line text-primary me-2"></i>AMR Dashboard</h1>
+        <p class="text-muted">Real-time resistance monitoring and analytics</p>
+    </div>
+</div>
+
+<!-- Stats Cards -->
+<div class="row mb-4">
+    <div class="col-md-3 mb-3">
+        <div class="card h-100 bg-primary-subtle border-primary">
+            <div class="card-body">
+                <h5 class="card-title"><i class="fas fa-shield-virus me-2"></i>Resistance Patterns</h5>
+                <h2 class="display-4">{{ resistance_count }}</h2>
+                <p class="card-text text-muted">Detected resistance patterns</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3 mb-3">
+        <div class="card h-100 bg-success-subtle border-success">
+            <div class="card-body">
+                <h5 class="card-title"><i class="fas fa-hospital me-2"></i>Facilities</h5>
+                <h2 class="display-4">{{ facility_count }}</h2>
+                <p class="card-text text-muted">Participating healthcare facilities</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3 mb-3">
+        <div class="card h-100 bg-warning-subtle border-warning">
+            <div class="card-body">
+                <h5 class="card-title"><i class="fas fa-bacteria me-2"></i>Pathogens</h5>
+                <h2 class="display-4">{{ pathogen_count }}</h2>
+                <p class="card-text text-muted">Monitored pathogen species</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3 mb-3">
+        <div class="card h-100 bg-danger-subtle border-danger">
+            <div class="card-body">
+                <h5 class="card-title"><i class="fas fa-bell me-2"></i>Alerts</h5>
+                <h2 class="display-4" id="alertCount">{{ recent_alerts|length }}</h2>
+                <p class="card-text text-muted">Unread critical alerts</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Map and Trends -->
+<div class="row mb-4">
+    <!-- Resistance Map -->
+    <div class="col-md-8 mb-3">
+        <div class="card h-100">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="fas fa-map-marked-alt text-success me-2"></i>Resistance Hotspots</h5>
+                <a href="{{ url_for('dashboard.view_map') }}" class="btn btn-sm btn-outline-primary">Full Map</a>
+            </div>
+            <div class="card-body">
+                <div id="resistanceMap" style="height: 400px;"></div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Resistance Trends -->
+    <div class="col-md-4 mb-3">
+        <div class="card h-100">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="fas fa-chart-line text-info me-2"></i>Resistance Trends</h5>
+            </div>
+            <div class="card-body">
+                <canvas id="resistanceTrendChart"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mb-4">
+    <!-- Top Resistant Pathogens -->
+    <div class="col-md-6 mb-3">
+        <div class="card h-100">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="fas fa-bacteria text-danger me-2"></i>Top Resistant Pathogens</h5>
+            </div>
+            <div class="card-body">
+                <canvas id="topPathogensChart"></canvas>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Recent Alerts -->
+    <div class="col-md-6 mb-3">
+        <div class="card h-100">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="fas fa-bell text-warning me-2"></i>Recent Alerts</h5>
+                <a href="{{ url_for('alerts.view_alerts') }}" class="btn btn-sm btn-outline-warning">View All</a>
+            </div>
+            <div class="card-body">
+                {% if recent_alerts %}
+                <div class="list-group">
+                    {% for alert in recent_alerts %}
+                    <div class="list-group-item list-group-item-action flex-column align-items-start">
+                        <div class="d-flex w-100 justify-content-between">
+                            <h5 class="mb-1">
+                                {% if alert.severity >= 4 %}
+                                <span class="badge bg-danger me-2">Critical</span>
+                                {% elif alert.severity == 3 %}
+                                <span class="badge bg-warning text-dark me-2">High</span>
+                                {% else %}
+                                <span class="badge bg-info me-2">Medium</span>
+                                {% endif %}
+                                {{ alert.title }}
+                            </h5>
+                            <small class="text-muted">{{ alert.created_at.strftime('%b %d') }}</small>
+                        </div>
+                        <p class="mb-1">{{ alert.message[:100] }}{% if alert.message|length > 100 %}...{% endif %}</p>
+                        <div class="d-flex w-100 justify-content-between mt-2">
+                            <small class="text-muted">
+                                {% if alert.region %}
+                                <i class="fas fa-map-marker-alt me-1"></i> {{ alert.region }}
+                                {% endif %}
+                            </small>
+                            <a href="{{ url_for('alerts.view_alerts') }}" class="btn btn-sm btn-outline-secondary">Details</a>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <div class="alert alert-info">
+                    <i class="fas fa-info-circle me-2"></i> No new alerts
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Recent Lab Reports -->
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="fas fa-file-medical-alt text-primary me-2"></i>Recent Lab Reports</h5>
+            </div>
+            <div class="card-body">
+                {% if recent_reports %}
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead>
+                            <tr>
+                                <th>Report ID</th>
+                                <th>Facility</th>
+                                <th>Date</th>
+                                <th>Sample Type</th>
+                                <th>Clinical Diagnosis</th>
+                                <th>Resistance Profiles</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for report in recent_reports %}
+                            <tr>
+                                <td>{{ report.report_id }}</td>
+                                <td>{{ report.facility.name }}</td>
+                                <td>{{ report.report_date.strftime('%Y-%m-%d') }}</td>
+                                <td>{{ report.sample_type }}</td>
+                                <td>{{ report.clinical_diagnosis or 'N/A' }}</td>
+                                <td>
+                                    <span class="badge bg-primary rounded-pill">{{ report.resistance_profiles.count() }}</span>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="alert alert-info">
+                    <i class="fas fa-info-circle me-2"></i> No lab reports available
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // Initialize Mapbox map
+        mapboxgl.accessToken = '{{ mapbox_token if mapbox_token else "pk.eyJ1IjoiZXhhbXBsZSIsImEiOiJjbGdxNjhibWkwMzBuM2VvYTk5cjZmYmRmIn0.xdlDKR8DCOZ9i-OaUn9v5w" }}';
+        
+        const map = new mapboxgl.Map({
+            container: 'resistanceMap',
+            style: 'mapbox://styles/mapbox/dark-v10',
+            center: [78.9629, 20.5937], // Center on India
+            zoom: 3
+        });
+        
+        map.addControl(new mapboxgl.NavigationControl());
+        
+        // Add data points when map loads
+        map.on('load', function() {
+            const mapData = {{ map_data|safe }};
+            
+            // Add markers for each location
+            mapData.forEach(location => {
+                // Create marker element
+                const el = document.createElement('div');
+                el.className = 'marker';
+                el.style.width = '20px';
+                el.style.height = '20px';
+                el.style.borderRadius = '50%';
+                el.style.backgroundColor = location.color;
+                el.style.border = '2px solid white';
+                
+                // Create popup
+                const popup = new mapboxgl.Popup({ offset: 25 })
+                    .setHTML(`
+                        <h5>${location.name}</h5>
+                        <p>${location.location}</p>
+                        ${location.resistancePercentage !== null ? 
+                          `<p><strong>Resistance Level:</strong> ${location.resistancePercentage}%</p>
+                          <p><strong>Risk Level:</strong> <span class="badge" style="background-color:${location.color}">${location.riskLevel}</span></p>` : 
+                          `<p><strong>Environmental Sample:</strong> ${location.sampleType}</p>
+                          <p><strong>Pathogen:</strong> ${location.pathogen}</p>`
+                        }
+                    `);
+                
+                // Add marker to map
+                new mapboxgl.Marker(el)
+                    .setLngLat([location.longitude, location.latitude])
+                    .setPopup(popup)
+                    .addTo(map);
+            });
+        });
+        
+        // Load resistance trend data
+        fetch('/api/resistance-trends')
+            .then(response => response.json())
+            .then(data => {
+                const ctx = document.getElementById('resistanceTrendChart').getContext('2d');
+                
+                new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: data.map(item => item.month),
+                        datasets: [{
+                            label: 'Resistance %',
+                            data: data.map(item => item.percentage),
+                            fill: false,
+                            borderColor: '#0dcaf0',
+                            tension: 0.1,
+                            pointBackgroundColor: '#0dcaf0'
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                max: 100,
+                                title: {
+                                    display: true,
+                                    text: 'Resistance %'
+                                }
+                            }
+                        }
+                    }
+                });
+            })
+            .catch(error => console.error('Error loading resistance trends:', error));
+            
+        // Load top pathogens data
+        fetch('/api/top-pathogens')
+            .then(response => response.json())
+            .then(data => {
+                const ctx = document.getElementById('topPathogensChart').getContext('2d');
+                
+                new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: data.map(item => item.pathogen),
+                        datasets: [{
+                            label: 'Resistance %',
+                            data: data.map(item => item.percentage),
+                            backgroundColor: [
+                                '#dc3545', '#fd7e14', '#ffc107', '#20c997', '#0dcaf0',
+                                '#6610f2', '#d63384', '#198754', '#0d6efd', '#6c757d'
+                            ]
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                max: 100,
+                                title: {
+                                    display: true,
+                                    text: 'Resistance %'
+                                }
+                            }
+                        }
+                    }
+                });
+            })
+            .catch(error => console.error('Error loading top pathogens:', error));
+    });
+</script>
+{% endblock %}

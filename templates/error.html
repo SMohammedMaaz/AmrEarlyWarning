@@ -1,0 +1,64 @@
+{% extends "layout.html" %}
+
+{% block title %}AMR Network - Error {{ code }}{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center mt-5">
+    <div class="col-md-8 col-lg-6">
+        <div class="card shadow text-center">
+            <div class="card-body p-5">
+                <div class="display-1 text-danger mb-4">
+                    <i class="fas fa-exclamation-triangle"></i>
+                </div>
+                
+                <h1 class="display-4">Error {{ code }}</h1>
+                <p class="lead text-muted">{{ error }}</p>
+                
+                {% if code == 404 %}
+                <div class="alert alert-info">
+                    <i class="fas fa-info-circle me-2"></i>The page you're looking for doesn't exist or has been moved.
+                </div>
+                {% elif code == 500 %}
+                <div class="alert alert-danger">
+                    <i class="fas fa-exclamation-circle me-2"></i>We're experiencing technical difficulties. Please try again later.
+                </div>
+                {% elif code == 403 %}
+                <div class="alert alert-warning">
+                    <i class="fas fa-lock me-2"></i>You don't have permission to access this resource.
+                </div>
+                {% endif %}
+                
+                <hr>
+                
+                <div class="d-grid gap-2 col-md-8 mx-auto">
+                    <a href="{{ url_for('dashboard.home') if current_user.is_authenticated else url_for('auth.index') }}" class="btn btn-primary">
+                        <i class="fas fa-home me-2"></i>Go to Homepage
+                    </a>
+                    
+                    {% if code == 500 %}
+                    <button onclick="window.location.reload()" class="btn btn-outline-secondary">
+                        <i class="fas fa-sync-alt me-2"></i>Try Again
+                    </button>
+                    {% endif %}
+                </div>
+                
+                <div class="mt-4">
+                    <p class="text-muted small">
+                        If you continue to experience issues, please contact your system administrator.
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row justify-content-center mt-4">
+    <div class="col-md-6 text-center">
+        <p class="text-muted">
+            <a href="{{ url_for('auth.index') }}" class="text-decoration-none">
+                <i class="fas fa-arrow-left me-2"></i>Back to Homepage
+            </a>
+        </p>
+    </div>
+</div>
+{% endblock %}

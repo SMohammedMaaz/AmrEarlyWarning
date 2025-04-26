@@ -1,0 +1,581 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <title>{% block title %}AMR Early-Warning & Mitigation Network{% endblock %}</title>
+    
+    <!-- Favicon and PWA icons -->
+    <link rel="icon" href="{{ url_for('static', filename='icons/favicon.svg') }}" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="{{ url_for('static', filename='icons/apple-touch-icon.svg') }}">
+    <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
+    <meta name="theme-color" content="#212529">
+    
+    <!-- Bootstrap CSS -->
+    <link rel="stylesheet" href="https://cdn.replit.com/agent/bootstrap-agent-dark-theme.min.css">
+    
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+    
+    <!-- Font Awesome for icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    
+    <!-- Mapbox CSS (if needed) -->
+    {% block extra_css %}{% endblock %}
+    
+    <!-- Firebase config -->
+    <input type="hidden" id="firebase-api-key" value="{{ firebase_api_key }}">
+    <input type="hidden" id="firebase-project-id" value="{{ firebase_project_id }}">
+    <input type="hidden" id="firebase-app-id" value="{{ firebase_app_id }}">
+    
+    <!-- Meta tags -->
+    <meta name="description" content="Privacy-first antimicrobial resistance detection platform with geospatial mapping and real-time alerts.">
+    <meta name="keywords" content="AMR, antimicrobial resistance, healthcare, pathogen detection, disease surveillance">
+</head>
+<body>
+    <!-- Navbar -->
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark fixed-top">
+        <div class="container-fluid">
+            <a class="navbar-brand d-flex align-items-center" href="{{ url_for('index') }}">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" class="me-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M20.42 4.58a5.4 5.4 0 0 0-7.65 0l-.77.78-.77-.78a5.4 5.4 0 0 0-7.65 0C1.46 6.7 1.33 10.28 4 13l8 8 8-8c2.67-2.72 2.54-6.3.42-8.42z"></path>
+                    <path d="M3.5 12h6"></path>
+                    <path d="M14.5 12h6"></path>
+                    <path d="M12 3v6"></path>
+                    <path d="M12 14v7"></path>
+                </svg>
+                <span>AMR Network</span>
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav me-auto">
+                    {% if current_user.is_authenticated %}
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.path == '/dashboard/' %}active{% endif %}" href="{{ url_for('dashboard.home') }}">
+                            <i class="fas fa-chart-line me-1"></i> Dashboard
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.path == '/dashboard/map' %}active{% endif %}" href="{{ url_for('dashboard.map_view') }}">
+                            <i class="fas fa-map-marked-alt me-1"></i> Map
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link position-relative {% if request.path.startswith('/alerts') %}active{% endif %}" href="{{ url_for('alerts.alerts_view') }}">
+                            <i class="fas fa-bell me-1"></i> Alerts
+                            <span id="alert-count-badge" class="badge bg-danger rounded-pill d-none">0</span>
+                        </a>
+                    </li>
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" id="dataDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                            <i class="fas fa-database me-1"></i> Data
+                        </a>
+                        <ul class="dropdown-menu" aria-labelledby="dataDropdown">
+                            <li><a class="dropdown-item" href="{{ url_for('data.upload') }}">Upload Data</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('data.view_data') }}">View Data</a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item" href="{{ url_for('alerts.treatment_guidance') }}">Treatment Guidance</a></li>
+                        </ul>
+                    </li>
+                    {% endif %}
+                </ul>
+                <ul class="navbar-nav ms-auto">
+                    {% if current_user.is_authenticated %}
+                    <li class="nav-item">
+                        <span class="nav-link">
+                            <i class="fas fa-wifi me-1"></i>
+                            <span id="connection-status" class="text-success">Online</span>
+                        </span>
+                    </li>
+                    <li class="nav-item">
+                        <span class="nav-link">
+                            <i class="fas fa-sync-alt me-1"></i>
+                            <span id="sync-status" class="text-success">Synced</span>
+                        </span>
+                    </li>
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" id="userDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                            <i class="fas fa-user-circle me-1"></i> {{ current_user.username }}
+                        </a>
+                        <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="userDropdown">
+                            <li><a class="dropdown-item" href="{{ url_for('auth.profile') }}">Profile</a></li>
+                            <li><a class="dropdown-item" href="#" data-bs-toggle="modal" data-bs-target="#settingsModal">Settings</a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item" href="{{ url_for('auth.logout') }}" id="logout-btn">Logout</a></li>
+                        </ul>
+                    </li>
+                    {% else %}
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.path == '/auth/login' %}active{% endif %}" href="{{ url_for('auth.login') }}">
+                            <i class="fas fa-sign-in-alt me-1"></i> Login
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.path == '/auth/register' %}active{% endif %}" href="{{ url_for('auth.register') }}">
+                            <i class="fas fa-user-plus me-1"></i> Register
+                        </a>
+                    </li>
+                    {% endif %}
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main content -->
+    <div class="container-fluid">
+        <div class="row">
+            {% if current_user.is_authenticated and request.path != '/' and not request.path.startswith('/auth/') %}
+            <!-- Sidebar -->
+            <div class="col-md-3 col-lg-2 d-md-block sidebar collapse">
+                <div class="position-sticky pt-3">
+                    <ul class="nav flex-column">
+                        <li class="nav-item">
+                            <a class="nav-link {% if request.path == '/dashboard/' %}active{% endif %}" href="{{ url_for('dashboard.home') }}">
+                                <i class="fas fa-tachometer-alt me-2"></i> Overview
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link {% if request.path == '/dashboard/map' %}active{% endif %}" href="{{ url_for('dashboard.map_view') }}">
+                                <i class="fas fa-map me-2"></i> Resistance Map
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link {% if request.path == '/dashboard/analytics' %}active{% endif %}" href="{{ url_for('dashboard.analytics') }}">
+                                <i class="fas fa-chart-bar me-2"></i> Analytics
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link {% if request.path == '/dashboard/predictions' %}active{% endif %}" href="{{ url_for('dashboard.predictions') }}">
+                                <i class="fas fa-chart-line me-2"></i> Predictions
+                            </a>
+                        </li>
+                        <li class="nav-header mt-3 text-muted ps-3 small text-uppercase">Alerts</li>
+                        <li class="nav-item">
+                            <a class="nav-link {% if request.path == '/alerts/' %}active{% endif %}" href="{{ url_for('alerts.alerts_view') }}">
+                                <i class="fas fa-bell me-2"></i> My Alerts
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link {% if request.path == '/alerts/create' %}active{% endif %}" href="{{ url_for('alerts.create_alert') }}">
+                                <i class="fas fa-plus-circle me-2"></i> Create Alert
+                            </a>
+                        </li>
+                        <li class="nav-header mt-3 text-muted ps-3 small text-uppercase">Data Management</li>
+                        <li class="nav-item">
+                            <a class="nav-link {% if request.path == '/data/upload' %}active{% endif %}" href="{{ url_for('data.upload') }}">
+                                <i class="fas fa-upload me-2"></i> Upload Data
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link {% if request.path == '/data/view' %}active{% endif %}" href="{{ url_for('data.view_data') }}">
+                                <i class="fas fa-table me-2"></i> View Data
+                            </a>
+                        </li>
+                        <li class="nav-header mt-3 text-muted ps-3 small text-uppercase">Tools</li>
+                        <li class="nav-item">
+                            <a class="nav-link {% if request.path == '/alerts/guidance' %}active{% endif %}" href="{{ url_for('alerts.treatment_guidance') }}">
+                                <i class="fas fa-pills me-2"></i> Treatment Guidance
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="#" data-bs-toggle="modal" data-bs-target="#settingsModal">
+                                <i class="fas fa-cog me-2"></i> Settings
+                            </a>
+                        </li>
+                    </ul>
+                    <div class="mt-4 ps-3">
+                        <div class="d-flex align-items-center mb-2">
+                            <i class="fas fa-signal me-2"></i>
+                            <span>Offline Mode</span>
+                            <div class="form-check form-switch ms-auto me-3">
+                                <input class="form-check-input" type="checkbox" id="offline-mode-toggle">
+                                <label class="form-check-label visually-hidden" for="offline-mode-toggle">Enable Offline Mode</label>
+                            </div>
+                        </div>
+                        <div class="d-flex align-items-center">
+                            <i class="fas fa-bell me-2"></i>
+                            <span>Notifications</span>
+                            <div class="form-check form-switch ms-auto me-3">
+                                <input class="form-check-input" type="checkbox" id="notification-toggle">
+                                <label class="form-check-label visually-hidden" for="notification-toggle">Enable Notifications</label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <!-- Main content area -->
+            <main class="col-md-9 ms-sm-auto col-lg-10 px-md-4 main-content">
+                <!-- Flash messages -->
+                {% with messages = get_flashed_messages(with_categories=true) %}
+                    {% if messages %}
+                        {% for category, message in messages %}
+                            <div class="alert alert-{{ category }} alert-dismissible fade show mt-3" role="alert">
+                                {{ message }}
+                                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                            </div>
+                        {% endfor %}
+                    {% endif %}
+                {% endwith %}
+                
+                <!-- Page content -->
+                {% block content %}{% endblock %}
+            </main>
+            {% else %}
+            <!-- Full width content for landing page and auth pages -->
+            <main class="col-12 px-4 main-content">
+                <!-- Flash messages -->
+                {% with messages = get_flashed_messages(with_categories=true) %}
+                    {% if messages %}
+                        {% for category, message in messages %}
+                            <div class="alert alert-{{ category }} alert-dismissible fade show mt-3" role="alert">
+                                {{ message }}
+                                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                            </div>
+                        {% endfor %}
+                    {% endif %}
+                {% endwith %}
+                
+                <!-- Page content -->
+                {% block content %}{% endblock %}
+            </main>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="footer py-3 bg-dark text-light mt-auto">
+        <div class="container">
+            <div class="row">
+                <div class="col-md-6">
+                    <p class="mb-0">&copy; {% now 'Y' %} AMR Early-Warning &amp; Mitigation Network</p>
+                </div>
+                <div class="col-md-6 text-md-end">
+                    <p class="mb-0">
+                        <span id="offline-mode-indicator" class="badge bg-warning text-dark d-none me-2">
+                            <i class="fas fa-signal-slash me-1"></i> Offline Mode
+                        </span>
+                        <a href="#" class="text-decoration-none text-light" data-bs-toggle="modal" data-bs-target="#aboutModal">About</a> | 
+                        <a href="#" class="text-decoration-none text-light" data-bs-toggle="modal" data-bs-target="#privacyModal">Privacy</a>
+                    </p>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <!-- Settings Modal -->
+    <div class="modal fade" id="settingsModal" tabindex="-1" aria-labelledby="settingsModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="settingsModalLabel"><i class="fas fa-cog me-2"></i>Settings</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row">
+                        <div class="col-md-3">
+                            <div class="nav flex-column nav-pills" id="v-pills-tab" role="tablist" aria-orientation="vertical">
+                                <button class="nav-link active" id="v-pills-general-tab" data-bs-toggle="pill" data-bs-target="#v-pills-general" type="button" role="tab" aria-controls="v-pills-general" aria-selected="true">General</button>
+                                <button class="nav-link" id="v-pills-notifications-tab" data-bs-toggle="pill" data-bs-target="#v-pills-notifications" type="button" role="tab" aria-controls="v-pills-notifications" aria-selected="false">Notifications</button>
+                                <button class="nav-link" id="v-pills-data-tab" data-bs-toggle="pill" data-bs-target="#v-pills-data" type="button" role="tab" aria-controls="v-pills-data" aria-selected="false">Data Preferences</button>
+                                <button class="nav-link" id="v-pills-offline-tab" data-bs-toggle="pill" data-bs-target="#v-pills-offline" type="button" role="tab" aria-controls="v-pills-offline" aria-selected="false">Offline Mode</button>
+                                <button class="nav-link" id="v-pills-security-tab" data-bs-toggle="pill" data-bs-target="#v-pills-security" type="button" role="tab" aria-controls="v-pills-security" aria-selected="false">Security</button>
+                            </div>
+                        </div>
+                        <div class="col-md-9">
+                            <div class="tab-content" id="v-pills-tabContent">
+                                <!-- General Settings -->
+                                <div class="tab-pane fade show active" id="v-pills-general" role="tabpanel" aria-labelledby="v-pills-general-tab">
+                                    <h4>General Settings</h4>
+                                    <form id="general-settings-form">
+                                        <div class="mb-3">
+                                            <label for="language-select" class="form-label">Language</label>
+                                            <select class="form-select" id="language-select">
+                                                <option value="en" selected>English</option>
+                                                <option value="hi">Hindi</option>
+                                                <option value="kn">Kannada</option>
+                                                <option value="ur">Urdu</option>
+                                            </select>
+                                        </div>
+                                        <div class="mb-3">
+                                            <label for="timezone-select" class="form-label">Timezone</label>
+                                            <select class="form-select" id="timezone-select">
+                                                <option value="UTC" selected>UTC</option>
+                                                <option value="Asia/Kolkata">India (IST)</option>
+                                                <option value="Europe/London">London (GMT)</option>
+                                                <option value="America/New_York">New York (EST)</option>
+                                            </select>
+                                        </div>
+                                        <div class="form-check form-switch mb-3">
+                                            <input class="form-check-input" type="checkbox" id="theme-toggle">
+                                            <label class="form-check-label" for="theme-toggle">Light Mode</label>
+                                        </div>
+                                        <div class="form-check form-switch mb-3">
+                                            <input class="form-check-input" type="checkbox" id="analytics-toggle" checked>
+                                            <label class="form-check-label" for="analytics-toggle">Enable Analytics</label>
+                                        </div>
+                                        <button type="submit" class="btn btn-primary">Save Changes</button>
+                                    </form>
+                                </div>
+                                
+                                <!-- Notification Settings -->
+                                <div class="tab-pane fade" id="v-pills-notifications" role="tabpanel" aria-labelledby="v-pills-notifications-tab">
+                                    <h4>Notification Settings</h4>
+                                    <form id="notification-settings-form">
+                                        <div class="form-check form-switch mb-3">
+                                            <input class="form-check-input" type="checkbox" id="enable-notifications" checked>
+                                            <label class="form-check-label" for="enable-notifications">Enable Notifications</label>
+                                        </div>
+                                        <div class="mb-3">
+                                            <label class="form-label">Notification Channels</label>
+                                            <div class="form-check">
+                                                <input class="form-check-input" type="checkbox" id="browser-notifications" checked>
+                                                <label class="form-check-label" for="browser-notifications">Browser Notifications</label>
+                                            </div>
+                                            <div class="form-check">
+                                                <input class="form-check-input" type="checkbox" id="email-notifications" checked>
+                                                <label class="form-check-label" for="email-notifications">Email Notifications</label>
+                                            </div>
+                                            <div class="form-check">
+                                                <input class="form-check-input" type="checkbox" id="sms-notifications">
+                                                <label class="form-check-label" for="sms-notifications">SMS Notifications</label>
+                                            </div>
+                                        </div>
+                                        <div class="mb-3">
+                                            <label class="form-label">Notification Types</label>
+                                            <div class="form-check">
+                                                <input class="form-check-input" type="checkbox" id="critical-alerts" checked>
+                                                <label class="form-check-label" for="critical-alerts">Critical Alerts</label>
+                                            </div>
+                                            <div class="form-check">
+                                                <input class="form-check-input" type="checkbox" id="high-alerts" checked>
+                                                <label class="form-check-label" for="high-alerts">High Priority Alerts</label>
+                                            </div>
+                                            <div class="form-check">
+                                                <input class="form-check-input" type="checkbox" id="medium-alerts" checked>
+                                                <label class="form-check-label" for="medium-alerts">Medium Priority Alerts</label>
+                                            </div>
+                                            <div class="form-check">
+                                                <input class="form-check-input" type="checkbox" id="low-alerts">
+                                                <label class="form-check-label" for="low-alerts">Low Priority Alerts</label>
+                                            </div>
+                                        </div>
+                                        <button type="submit" class="btn btn-primary">Save Changes</button>
+                                    </form>
+                                </div>
+                                
+                                <!-- Data Preferences -->
+                                <div class="tab-pane fade" id="v-pills-data" role="tabpanel" aria-labelledby="v-pills-data-tab">
+                                    <h4>Data Preferences</h4>
+                                    <form id="data-preferences-form">
+                                        <div class="mb-3">
+                                            <label for="default-view-select" class="form-label">Default Data View</label>
+                                            <select class="form-select" id="default-view-select">
+                                                <option value="table" selected>Table</option>
+                                                <option value="chart">Chart</option>
+                                                <option value="map">Map</option>
+                                            </select>
+                                        </div>
+                                        <div class="mb-3">
+                                            <label for="data-refresh-rate" class="form-label">Data Refresh Rate (seconds)</label>
+                                            <input type="number" class="form-control" id="data-refresh-rate" min="30" max="600" value="300">
+                                        </div>
+                                        <div class="form-check form-switch mb-3">
+                                            <input class="form-check-input" type="checkbox" id="auto-refresh-toggle" checked>
+                                            <label class="form-check-label" for="auto-refresh-toggle">Auto-refresh Dashboard</label>
+                                        </div>
+                                        <div class="mb-3">
+                                            <label for="default-pathogen-filter" class="form-label">Default Pathogen Filter</label>
+                                            <select class="form-select" id="default-pathogen-filter">
+                                                <option value="">All Pathogens</option>
+                                                <option value="1">E. coli</option>
+                                                <option value="2">S. aureus</option>
+                                                <option value="3">K. pneumoniae</option>
+                                                <option value="4">P. aeruginosa</option>
+                                            </select>
+                                        </div>
+                                        <button type="submit" class="btn btn-primary">Save Changes</button>
+                                    </form>
+                                </div>
+                                
+                                <!-- Offline Mode -->
+                                <div class="tab-pane fade" id="v-pills-offline" role="tabpanel" aria-labelledby="v-pills-offline-tab">
+                                    <h4>Offline Mode</h4>
+                                    <div class="alert alert-info">
+                                        <i class="fas fa-info-circle me-2"></i> Offline mode allows you to access key features and submit data when you have limited or no connectivity.
+                                    </div>
+                                    <form id="offline-settings-form">
+                                        <div class="form-check form-switch mb-3">
+                                            <input class="form-check-input" type="checkbox" id="enable-offline-mode">
+                                            <label class="form-check-label" for="enable-offline-mode">Enable Offline Mode</label>
+                                        </div>
+                                        <div class="mb-3">
+                                            <label class="form-label">Cache Preferences</label>
+                                            <div class="form-check">
+                                                <input class="form-check-input" type="checkbox" id="cache-dashboard" checked>
+                                                <label class="form-check-label" for="cache-dashboard">Dashboard</label>
+                                            </div>
+                                            <div class="form-check">
+                                                <input class="form-check-input" type="checkbox" id="cache-maps" checked>
+                                                <label class="form-check-label" for="cache-maps">Maps</label>
+                                            </div>
+                                            <div class="form-check">
+                                                <input class="form-check-input" type="checkbox" id="cache-alerts" checked>
+                                                <label class="form-check-label" for="cache-alerts">Alerts</label>
+                                            </div>
+                                            <div class="form-check">
+                                                <input class="form-check-input" type="checkbox" id="cache-data-forms" checked>
+                                                <label class="form-check-label" for="cache-data-forms">Data Forms</label>
+                                            </div>
+                                        </div>
+                                        <div class="mb-3">
+                                            <label for="storage-limit" class="form-label">Storage Limit (MB)</label>
+                                            <input type="number" class="form-control" id="storage-limit" min="10" max="1000" value="100">
+                                        </div>
+                                        <button type="button" class="btn btn-secondary mb-3" id="clear-cache-btn">Clear Cached Data</button>
+                                        <div class="mb-3" id="cache-status">
+                                            <p class="mb-1"><strong>Current Cache Status:</strong></p>
+                                            <p class="mb-0"><small>Last synced: <span id="last-sync-time">N/A</span></small></p>
+                                            <p class="mb-0"><small>Storage used: <span id="storage-used">0 MB</span></small></p>
+                                            <p class="mb-0"><small>Pending uploads: <span id="pending-uploads">0</span></small></p>
+                                        </div>
+                                        <button type="submit" class="btn btn-primary">Save Changes</button>
+                                    </form>
+                                </div>
+                                
+                                <!-- Security -->
+                                <div class="tab-pane fade" id="v-pills-security" role="tabpanel" aria-labelledby="v-pills-security-tab">
+                                    <h4>Security Settings</h4>
+                                    <form id="security-settings-form">
+                                        <div class="mb-3">
+                                            <label for="current-password" class="form-label">Current Password</label>
+                                            <input type="password" class="form-control" id="current-password">
+                                        </div>
+                                        <div class="mb-3">
+                                            <label for="new-password" class="form-label">New Password</label>
+                                            <input type="password" class="form-control" id="new-password">
+                                        </div>
+                                        <div class="mb-3">
+                                            <label for="confirm-password" class="form-label">Confirm New Password</label>
+                                            <input type="password" class="form-control" id="confirm-password">
+                                        </div>
+                                        <div class="form-check form-switch mb-3">
+                                            <input class="form-check-input" type="checkbox" id="two-factor-toggle">
+                                            <label class="form-check-label" for="two-factor-toggle">Enable Two-Factor Authentication</label>
+                                        </div>
+                                        <div class="mb-4">
+                                            <label class="form-label">Active Sessions</label>
+                                            <div class="list-group">
+                                                <div class="list-group-item d-flex justify-content-between align-items-center">
+                                                    <div>
+                                                        <p class="mb-0"><strong>Current Session</strong></p>
+                                                        <small class="text-muted">This Device - Last Active: Just now</small>
+                                                    </div>
+                                                    <span class="badge bg-success">Active</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <button type="submit" class="btn btn-primary">Update Security Settings</button>
+                                        <button type="button" class="btn btn-danger ms-2" id="logout-all-btn">Logout All Devices</button>
+                                    </form>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- About Modal -->
+    <div class="modal fade" id="aboutModal" tabindex="-1" aria-labelledby="aboutModalLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="aboutModalLabel">About AMR Network</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <h5>AMR Early-Warning &amp; Mitigation Network</h5>
+                    <p>A privacy-first platform for ingesting and federating lab data for real-time antimicrobial resistance detection with geospatial risk mapping and smart alerts.</p>
+                    <p>Our mission is to help healthcare providers, researchers, and public health officials detect, track, and respond to antimicrobial resistance threats quickly and effectively.</p>
+                    <h6>Key Features:</h6>
+                    <ul>
+                        <li>Multi-Modal Data Ingestion</li>
+                        <li>Privacy-First Federated Analytics</li>
+                        <li>Real-Time Alerts &amp; Recommendations</li>
+                        <li>Interactive Geospatial Dashboard</li>
+                        <li>Treatment Guidance Engine</li>
+                    </ul>
+                    <p class="mb-0"><small>Version 1.0</small></p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Privacy Modal -->
+    <div class="modal fade" id="privacyModal" tabindex="-1" aria-labelledby="privacyModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="privacyModalLabel">Privacy Policy</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <h5>Privacy Policy</h5>
+                    <p>The AMR Early-Warning & Mitigation Network is committed to protecting your privacy and ensuring the security of health data. This privacy policy explains how we collect, use, and safeguard information.</p>
+                    
+                    <h6>Data Collection</h6>
+                    <p>We collect antimicrobial resistance data that is anonymized and aggregated to protect patient privacy. No personally identifiable information (PII) is stored or processed without explicit consent.</p>
+                    
+                    <h6>Federated Learning</h6>
+                    <p>Our platform uses federated learning technology to analyze patterns while keeping sensitive data local. Model weights, not raw data, are shared across the network.</p>
+                    
+                    <h6>Data Storage</h6>
+                    <p>All data is encrypted both in transit and at rest using industry-standard protocols (TLS v1.3, AES-256).</p>
+                    
+                    <h6>Access Controls</h6>
+                    <p>We implement strict role-based access controls to ensure data is only accessible to authorized personnel with a legitimate need.</p>
+                    
+                    <h6>Regulatory Compliance</h6>
+                    <p>Our platform is designed to comply with global data protection regulations including GDPR and HIPAA.</p>
+                    
+                    <h6>Data Sharing</h6>
+                    <p>Aggregated, anonymized data may be shared with public health agencies and research partners in accordance with our data sharing agreements and applicable regulations.</p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast container for notifications -->
+    <div id="toast-container"></div>
+
+    <!-- Bootstrap Bundle with Popper -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@3.7.0/dist/chart.min.js"></script>
+
+    <!-- Mapbox JS (if needed) -->
+    <script src='https://api.mapbox.com/mapbox-gl-js/v2.3.1/mapbox-gl.js'></script>
+    <link href='https://api.mapbox.com/mapbox-gl-js/v2.3.1/mapbox-gl.css' rel='stylesheet' />
+    
+    <!-- Common script for all pages -->
+    <script type="module" src="{{ url_for('static', filename='js/offline-manager.js') }}"></script>
+    <script type="module" src="{{ url_for('static', filename='js/notifications.js') }}"></script>
+
+    <!-- Page-specific scripts -->
+    {% block scripts %}{% endblock %}
+</body>
+</html>

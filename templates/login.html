@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+
+{% block title %}Login - AMR Network{% endblock %}
+
+{% block content %}
+<div class="container py-5">
+    <div class="row justify-content-center">
+        <div class="col-md-6 col-lg-5">
+            <div class="card border-0 shadow-lg">
+                <div class="card-body p-4">
+                    <div class="text-center mb-4">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-primary mb-3">
+                            <path d="M20.42 4.58a5.4 5.4 0 0 0-7.65 0l-.77.78-.77-.78a5.4 5.4 0 0 0-7.65 0C1.46 6.7 1.33 10.28 4 13l8 8 8-8c2.67-2.72 2.54-6.3.42-8.42z"></path>
+                            <path d="M3.5 12h6"></path>
+                            <path d="M14.5 12h6"></path>
+                            <path d="M12 3v6"></path>
+                            <path d="M12 14v7"></path>
+                        </svg>
+                        <h2 class="fs-4 fw-bold">Login to AMR Network</h2>
+                        <p class="text-muted small">Access the antimicrobial resistance platform</p>
+                    </div>
+                    
+                    <div id="login-error" class="alert alert-danger d-none" role="alert"></div>
+                    
+                    {% with messages = get_flashed_messages(with_categories=true) %}
+                        {% if messages %}
+                            {% for category, message in messages %}
+                                <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+                                    {{ message }}
+                                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                                </div>
+                            {% endfor %}
+                        {% endif %}
+                    {% endwith %}
+                    
+                    <form id="login-form" method="POST" action="{{ url_for('auth.login') }}">
+                        <div class="mb-3">
+                            <label for="username" class="form-label">Username</label>
+                            <input type="text" class="form-control" id="username" name="username" required autofocus>
+                        </div>
+                        <div class="mb-3">
+                            <label for="password" class="form-label">Password</label>
+                            <input type="password" class="form-control" id="password" name="password" required>
+                            <div class="form-text text-end">
+                                <a href="#" class="text-decoration-none small">Forgot password?</a>
+                            </div>
+                        </div>
+                        <div class="mb-3 form-check">
+                            <input type="checkbox" class="form-check-input" id="remember" name="remember">
+                            <label class="form-check-label" for="remember">Remember me</label>
+                        </div>
+                        <div class="d-grid">
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-sign-in-alt me-2"></i>Login
+                            </button>
+                        </div>
+                    </form>
+                    
+                    <div class="text-center my-3">
+                        <span class="text-muted">OR</span>
+                    </div>
+                    
+                    <div class="d-grid mb-3">
+                        <button id="google-sign-in" class="btn btn-outline-primary">
+                            <i class="fab fa-google me-2"></i>Sign in with Google
+                        </button>
+                    </div>
+                    
+                    <div class="text-center mt-4">
+                        <p class="mb-0 text-muted">Don't have an account? <a href="{{ url_for('auth.register') }}" class="text-decoration-none">Register</a></p>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Offline mode notice -->
+            <div class="card mt-3 bg-dark text-light d-none" id="offline-warning">
+                <div class="card-body">
+                    <div class="d-flex align-items-center">
+                        <i class="fas fa-wifi-slash me-3 text-warning fs-3"></i>
+                        <div>
+                            <h5 class="card-title mb-1">Offline Mode Available</h5>
+                            <p class="card-text small mb-0">Login to access offline features when you're in areas with limited connectivity.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<!-- Firebase authentication -->
+<script type="module" src="{{ url_for('static', filename='js/auth.js') }}"></script>
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // Check for offline capability
+        if ('serviceWorker' in navigator) {
+            document.getElementById('offline-warning').classList.remove('d-none');
+        }
+    });
+</script>
+{% endblock %}

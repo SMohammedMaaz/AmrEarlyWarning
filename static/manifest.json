@@ -1,0 +1,47 @@
+{
+  "name": "AMR Early-Warning & Mitigation Network",
+  "short_name": "AMR Network",
+  "description": "A privacy-first platform for real-time antimicrobial resistance detection",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#343a40",
+  "theme_color": "#343a40",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/static/images/icon-192x192.png",
+      "type": "image/png",
+      "sizes": "192x192",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/static/images/icon-512x512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Dashboard",
+      "short_name": "Dashboard",
+      "description": "View AMR dashboard",
+      "url": "/dashboard",
+      "icons": [{ "src": "/static/images/icon-192x192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Map",
+      "short_name": "Map",
+      "description": "View resistance map",
+      "url": "/map",
+      "icons": [{ "src": "/static/images/icon-192x192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Upload Data",
+      "short_name": "Upload",
+      "description": "Upload lab data",
+      "url": "/upload",
+      "icons": [{ "src": "/static/images/icon-192x192.png", "sizes": "192x192" }]
+    }
+  ]
+}

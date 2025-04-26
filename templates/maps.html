@@ -1,0 +1,318 @@
+{% extends "layout.html" %}
+
+{% block title %}AMR Network - Resistance Map{% endblock %}
+
+{% block head %}
+<style>
+    #map-container {
+        height: 70vh;
+        position: relative;
+    }
+    
+    #resistanceMap {
+        width: 100%;
+        height: 100%;
+        border-radius: 5px;
+    }
+    
+    #map-sidebar {
+        padding: 15px;
+        background-color: rgba(33, 37, 41, 0.9);
+        border-radius: 5px;
+        max-height: 70vh;
+        overflow-y: auto;
+    }
+    
+    #map-legend {
+        position: absolute;
+        bottom: 25px;
+        right: 10px;
+        background-color: rgba(33, 37, 41, 0.8);
+        padding: 10px;
+        border-radius: 5px;
+        z-index: 1;
+        font-size: 0.9rem;
+    }
+    
+    .mapboxgl-popup {
+        max-width: 300px;
+    }
+    
+    .mapboxgl-popup-content {
+        background-color: var(--bs-dark);
+        color: var(--bs-light);
+        padding: 15px;
+    }
+    
+    .location-item {
+        border-left: 4px solid var(--bs-primary);
+        transition: all 0.2s ease;
+        cursor: pointer;
+    }
+    
+    .location-item:hover {
+        background-color: rgba(13, 110, 253, 0.1);
+    }
+    
+    .location-item.active {
+        background-color: rgba(13, 110, 253, 0.15);
+        border-left-width: 6px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-md-8">
+        <h1><i class="fas fa-map-marked-alt text-success me-2"></i>Resistance Map</h1>
+        <p class="text-muted">Geographic visualization of antimicrobial resistance patterns</p>
+    </div>
+    <div class="col-md-4">
+        <div class="d-flex justify-content-end align-items-center h-100">
+            <select id="map-filter" class="form-select">
+                <option value="all" selected>All Locations</option>
+                <option value="facility">Healthcare Facilities</option>
+                <option value="environmental">Environmental Samples</option>
+                <option value="high_risk">High Risk Areas</option>
+                <option value="very_high_risk">Very High Risk Areas</option>
+            </select>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-8 mb-4">
+        <div class="card h-100">
+            <div class="card-body p-0">
+                <div id="map-container">
+                    <div id="resistanceMap"></div>
+                    <div id="map-legend"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-4 mb-4">
+        <div id="map-sidebar" class="card h-100">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="fas fa-search me-2"></i>Location Search</h5>
+            </div>
+            <div class="card-body">
+                <div class="input-group mb-3">
+                    <input type="text" class="form-control" id="location-search" placeholder="Search locations...">
+                    <button class="btn btn-outline-secondary" type="button" id="search-button">
+                        <i class="fas fa-search"></i>
+                    </button>
+                </div>
+                
+                <div id="location-list">
+                    <!-- Location list will be populated by JavaScript -->
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col-md-12">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="fas fa-chart-bar text-primary me-2"></i>Resistance by Region</h5>
+            </div>
+            <div class="card-body">
+                <canvas id="regionChart" height="100"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-6 mb-4">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="fas fa-bacteria text-danger me-2"></i>Top Resistant Pathogens</h5>
+            </div>
+            <div class="card-body">
+                <canvas id="pathogenChart" height="250"></canvas>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-6 mb-4">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="fas fa-pills text-warning me-2"></i>Antibiotic Efficacy</h5>
+            </div>
+            <div class="card-body">
+                <canvas id="antibioticChart" height="250"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/maps.js') }}"></script>
+<script>
+    // Set mapbox token for the maps.js file
+    mapboxToken = '{{ mapbox_token if mapbox_token else "pk.eyJ1IjoiZXhhbXBsZSIsImEiOiJjbGdxNjhibWkwMzBuM2VvYTk5cjZmYmRmIn0.xdlDKR8DCOZ9i-OaUn9v5w" }}';
+    
+    document.addEventListener('DOMContentLoaded', function() {
+        // Map data from the server
+        const mapData = {{ map_data|safe }};
+        
+        // Populate location list in sidebar
+        const locationList = document.getElementById('location-list');
+        if (locationList) {
+            let listHTML = '';
+            
+            mapData.forEach(location => {
+                const riskColor = location.color;
+                
+                listHTML += `
+                    <div class="location-item p-2 mb-2 rounded" data-lat="${location.latitude}" data-lng="${location.longitude}">
+                        <div class="d-flex align-items-center">
+                            <div style="width: 12px; height: 12px; border-radius: 50%; background-color: ${riskColor}; margin-right: 10px;"></div>
+                            <div>
+                                <h6 class="mb-0">${location.name}</h6>
+                                <small class="text-muted">${location.location}</small>
+                                <div class="mt-1">
+                                    <span class="badge" style="background-color: ${riskColor}">
+                                        ${location.riskLevel}
+                                    </span>
+                                    ${location.resistancePercentage !== null ? 
+                                      `<span class="badge bg-light text-dark">${location.resistancePercentage}%</span>` : 
+                                      `<span class="badge bg-secondary">Environmental</span>`
+                                    }
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+            
+            locationList.innerHTML = listHTML;
+            
+            // Add click event to location items
+            document.querySelectorAll('.location-item').forEach(item => {
+                item.addEventListener('click', function() {
+                    const lat = parseFloat(this.getAttribute('data-lat'));
+                    const lng = parseFloat(this.getAttribute('data-lng'));
+                    
+                    // Remove active class from all items
+                    document.querySelectorAll('.location-item').forEach(i => i.classList.remove('active'));
+                    // Add active class to clicked item
+                    this.classList.add('active');
+                    
+                    // Fly to location
+                    const mapInstance = document.getElementById('resistanceMap').mapboxGl;
+                    if (mapInstance) {
+                        mapInstance.flyTo({
+                            center: [lng, lat],
+                            zoom: 10,
+                            duration: 1500
+                        });
+                    }
+                });
+            });
+        }
+        
+        // Search functionality
+        const searchInput = document.getElementById('location-search');
+        const searchButton = document.getElementById('search-button');
+        
+        function performSearch() {
+            const searchTerm = searchInput.value.toLowerCase();
+            const locationItems = document.querySelectorAll('.location-item');
+            
+            locationItems.forEach(item => {
+                const locationName = item.querySelector('h6').textContent.toLowerCase();
+                const locationDesc = item.querySelector('small').textContent.toLowerCase();
+                
+                if (locationName.includes(searchTerm) || locationDesc.includes(searchTerm)) {
+                    item.style.display = '';
+                } else {
+                    item.style.display = 'none';
+                }
+            });
+        }
+        
+        if (searchInput) {
+            searchInput.addEventListener('keyup', function(e) {
+                if (e.key === 'Enter') {
+                    performSearch();
+                }
+            });
+        }
+        
+        if (searchButton) {
+            searchButton.addEventListener('click', performSearch);
+        }
+        
+        // Region chart
+        const regionData = {};
+        
+        // Process data for region chart
+        mapData.forEach(location => {
+            if (location.resistancePercentage !== null) {
+                const region = location.location.split(',')[1]?.trim() || 'Unknown';
+                
+                if (!regionData[region]) {
+                    regionData[region] = {
+                        totalPercentage: 0,
+                        count: 0
+                    };
+                }
+                
+                regionData[region].totalPercentage += location.resistancePercentage;
+                regionData[region].count++;
+            }
+        });
+        
+        // Calculate average resistance by region
+        const regionLabels = [];
+        const regionValues = [];
+        const regionColors = [];
+        
+        for (const region in regionData) {
+            regionLabels.push(region);
+            const avgResistance = regionData[region].totalPercentage / regionData[region].count;
+            regionValues.push(avgResistance.toFixed(1));
+            
+            // Determine color based on resistance level
+            let color = '#28a745'; // Green
+            if (avgResistance >= 75) color = '#dc3545'; // Red
+            else if (avgResistance >= 50) color = '#fd7e14'; // Orange
+            else if (avgResistance >= 25) color = '#ffc107'; // Yellow
+            
+            regionColors.push(color);
+        }
+        
+        // Create region chart
+        const regionChartCtx = document.getElementById('regionChart').getContext('2d');
+        new Chart(regionChartCtx, {
+            type: 'bar',
+            data: {
+                labels: regionLabels,
+                datasets: [{
+                    label: 'Average Resistance %',
+                    data: regionValues,
+                    backgroundColor: regionColors
+                }]
+            },
+            options: {
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        max: 100,
+                        title: {
+                            display: true,
+                            text: 'Resistance %'
+                        }
+                    }
+                }
+            }
+        });
+    });
+</script>
+{% endblock %}

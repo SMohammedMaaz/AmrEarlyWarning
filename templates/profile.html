@@ -1,0 +1,255 @@
+{% extends "layout.html" %}
+
+{% block title %}AMR Network - Profile{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col">
+        <h1><i class="fas fa-user-circle text-primary me-2"></i>User Profile</h1>
+        <p class="text-muted">Manage your account and notification preferences</p>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-lg-8">
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="fas fa-id-card me-2"></i>Account Information</h5>
+            </div>
+            <div class="card-body">
+                <form action="{{ url_for('auth.update_profile') }}" method="post">
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label for="username" class="form-label">Username</label>
+                            <input type="text" class="form-control" id="username" value="{{ user.username }}" readonly>
+                            <div class="form-text">Username cannot be changed</div>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="email" class="form-label">Email</label>
+                            <input type="email" class="form-control" id="email" value="{{ user.email }}" readonly>
+                        </div>
+                    </div>
+                    
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label for="full_name" class="form-label">Full Name</label>
+                            <input type="text" class="form-control" id="full_name" name="full_name" value="{{ user.full_name or '' }}">
+                        </div>
+                        <div class="col-md-6">
+                            <label for="organization" class="form-label">Organization</label>
+                            <input type="text" class="form-control" id="organization" name="organization" value="{{ user.organization or '' }}">
+                        </div>
+                    </div>
+                    
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label for="phone_number" class="form-label">Phone Number</label>
+                            <input type="tel" class="form-control" id="phone_number" name="phone_number" value="{{ user.phone_number or '' }}" placeholder="+1 (555) 123-4567">
+                            <div class="form-text">For critical alerts and notifications</div>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="role" class="form-label">Role</label>
+                            <input type="text" class="form-control" id="role" value="{{ user.role.value|title|replace('_', ' ') }}" readonly>
+                        </div>
+                    </div>
+                    
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label for="last_login" class="form-label">Last Login</label>
+                            <input type="text" class="form-control" id="last_login" value="{{ user.last_login.strftime('%Y-%m-%d %H:%M') if user.last_login else 'N/A' }}" readonly>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="account_created" class="form-label">Account Created</label>
+                            <input type="text" class="form-control" id="account_created" value="{{ user.created_at.strftime('%Y-%m-%d') if user.created_at else 'N/A' }}" readonly>
+                        </div>
+                    </div>
+                    
+                    <div class="d-grid gap-2">
+                        <button type="submit" class="btn btn-primary">
+                            <i class="fas fa-save me-2"></i>Update Profile
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+        
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="fas fa-bell me-2"></i>Notification Preferences</h5>
+            </div>
+            <div class="card-body">
+                <form>
+                    <div class="row mb-3">
+                        <div class="col-12">
+                            <label class="form-label">Notification Channels</label>
+                            
+                            <div class="form-check form-switch mb-2">
+                                <input class="form-check-input" type="checkbox" id="email_notifications" checked>
+                                <label class="form-check-label" for="email_notifications">Email Notifications</label>
+                            </div>
+                            
+                            <div class="form-check form-switch mb-2">
+                                <input class="form-check-input" type="checkbox" id="sms_notifications" {% if user.phone_number %}checked{% endif %} {% if not user.phone_number %}disabled{% endif %}>
+                                <label class="form-check-label" for="sms_notifications">SMS Notifications</label>
+                                {% if not user.phone_number %}
+                                <div class="form-text text-warning">Add a phone number to enable SMS notifications</div>
+                                {% endif %}
+                            </div>
+                            
+                            <div class="form-check form-switch mb-2">
+                                <input class="form-check-input" type="checkbox" id="push_notifications" checked>
+                                <label class="form-check-label" for="push_notifications">Push Notifications</label>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="row mb-3">
+                        <div class="col-12">
+                            <label class="form-label">Alert Types</label>
+                            
+                            <div class="form-check mb-2">
+                                <input class="form-check-input" type="checkbox" id="outbreak_alerts" checked>
+                                <label class="form-check-label" for="outbreak_alerts">Outbreak Alerts</label>
+                            </div>
+                            
+                            <div class="form-check mb-2">
+                                <input class="form-check-input" type="checkbox" id="resistance_alerts" checked>
+                                <label class="form-check-label" for="resistance_alerts">Critical Resistance Alerts</label>
+                            </div>
+                            
+                            <div class="form-check mb-2">
+                                <input class="form-check-input" type="checkbox" id="environmental_alerts" checked>
+                                <label class="form-check-label" for="environmental_alerts">Environmental Detection Alerts</label>
+                            </div>
+                            
+                            <div class="form-check mb-2">
+                                <input class="form-check-input" type="checkbox" id="system_alerts" checked>
+                                <label class="form-check-label" for="system_alerts">System Notifications</label>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label for="minimum_severity" class="form-label">Minimum Alert Severity</label>
+                            <select class="form-select" id="minimum_severity">
+                                <option value="1">All Alerts</option>
+                                <option value="2">Medium and Above</option>
+                                <option value="3" selected>High and Above</option>
+                                <option value="4">Critical Only</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="alert_frequency" class="form-label">Alert Frequency</label>
+                            <select class="form-select" id="alert_frequency">
+                                <option value="immediate" selected>Immediate</option>
+                                <option value="hourly">Hourly Digest</option>
+                                <option value="daily">Daily Digest</option>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <div class="d-grid gap-2">
+                        <button type="submit" class="btn btn-primary">
+                            <i class="fas fa-save me-2"></i>Save Preferences
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-lg-4">
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="fas fa-lock me-2"></i>Security</h5>
+            </div>
+            <div class="card-body">
+                <form>
+                    <div class="mb-3">
+                        <label for="current_password" class="form-label">Current Password</label>
+                        <input type="password" class="form-control" id="current_password">
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="new_password" class="form-label">New Password</label>
+                        <input type="password" class="form-control" id="new_password">
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="confirm_password" class="form-label">Confirm New Password</label>
+                        <input type="password" class="form-control" id="confirm_password">
+                    </div>
+                    
+                    <div class="d-grid gap-2">
+                        <button type="submit" class="btn btn-primary">
+                            <i class="fas fa-key me-2"></i>Change Password
+                        </button>
+                    </div>
+                </form>
+                
+                <hr>
+                
+                <h6 class="mt-4">Two-Factor Authentication</h6>
+                <p class="text-muted small">Enhance your account security with two-factor authentication.</p>
+                
+                <div class="d-grid gap-2">
+                    <button class="btn btn-outline-primary">
+                        <i class="fas fa-shield-alt me-2"></i>Enable 2FA
+                    </button>
+                </div>
+                
+                <h6 class="mt-4">Active Sessions</h6>
+                <div class="list-group list-group-flush">
+                    <div class="list-group-item px-0">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <i class="fas fa-laptop me-2"></i>Current Device
+                                <div class="text-muted small">{{ request.user_agent.string }}</div>
+                                <div class="text-muted small">{{ request.remote_addr }}</div>
+                            </div>
+                            <span class="badge bg-success">Active</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="fas fa-chart-pie me-2"></i>Activity</h5>
+            </div>
+            <div class="card-body">
+                <div class="d-flex align-items-center mb-3">
+                    <div class="me-3">
+                        <div class="bg-primary rounded-circle d-flex align-items-center justify-content-center" style="width: 48px; height: 48px;">
+                            <i class="fas fa-upload text-white"></i>
+                        </div>
+                    </div>
+                    <div>
+                        <h6 class="mb-0">Data Uploads</h6>
+                        <span class="text-muted">{{ user.reports.count() }} reports submitted</span>
+                    </div>
+                </div>
+                
+                <div class="d-flex align-items-center mb-3">
+                    <div class="me-3">
+                        <div class="bg-success rounded-circle d-flex align-items-center justify-content-center" style="width: 48px; height: 48px;">
+                            <i class="fas fa-bell text-white"></i>
+                        </div>
+                    </div>
+                    <div>
+                        <h6 class="mb-0">Alerts</h6>
+                        <span class="text-muted">{{ user.alerts_received.count() }} alerts received</span>
+                    </div>
+                </div>
+                
+                <div class="progress" style="height: 5px;">
+                    <div class="progress-bar bg-success" role="progressbar" style="width: 75%;" aria-valuenow="75" aria-valuemin="0" aria-valuemax="100"></div>
+                </div>
+                <div class="text-muted text-center small mt-2">Profile completion: 75%</div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
